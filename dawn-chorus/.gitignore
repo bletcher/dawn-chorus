@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Data & generated artifacts (don't commit station DBs or outputs)
+*.db
+*.sqlite
+*_weather.csv
+results/
+
+# Keep the example config despite the csv rule above
+!config.example.yaml
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

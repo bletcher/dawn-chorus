@@ -1,0 +1,13 @@
+[project]
+name = "dawnchorus"
+version = "0.3.0"
+description = "Dawn-chorus phenology from BirdNET detection databases"
+requires-python = ">=3.9"
+dependencies = ["astral>=3.2", "pandas>=1.5", "matplotlib>=3.6", "pyyaml>=6.0", "requests>=2.28"]
+
+[project.scripts]
+dawnchorus = "dawnchorus.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

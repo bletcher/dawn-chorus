@@ -1,0 +1,30 @@
+# dawnchorus analysis config — pass with --config
+# All values shown are the defaults; override only what you need.
+
+anchor: dawn               # "dawn" (civil twilight begin) or "sunrise"
+
+# Fixed morning window, in minutes relative to the anchor.
+# Default = 2 h before dawn to 4 h after — bounds which detections are considered.
+window_start_min: -120
+window_end_min: 240
+
+bin_min: 5                 # time-bin width (min) for occupancy & peak
+
+# Onset/offset are robust QUANTILES of detection times within the window:
+#   onset  = onset_quantile           (default 0.05 -> 5th percentile)
+#   offset = 1 - onset_quantile       (default      -> 95th percentile)
+# One stray daytime false positive barely moves a 5th percentile, so this is
+# robust WITHOUT a detection-count rule and WITHOUT biasing quiet species late.
+# Set onset_quantile: 0.0 for literal first/last detection.
+# NOTE: quantile onset means "time by which 5% of the morning's detections have
+# occurred," not the literal first note — a consistent, comparison-friendly
+# definition. raw_first_min / raw_last_min give the literal extremes.
+onset_quantile: 0.05
+
+# Mornings with fewer detections than this get NaN onset/offset (too few points
+# to place a quantile) but still count toward composition & richness.
+min_detections_per_morning: 5
+
+# ECDF module reuses anchor/window/bin_min/min_detections_per_morning above.
+# Quantiles read off the mean ECDF for onset/median/offset:
+ecdf_quantiles: [0.05, 0.5, 0.95]
