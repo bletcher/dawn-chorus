@@ -110,6 +110,9 @@ def _crossing(grid: np.ndarray, F: np.ndarray, q: float) -> float:
 def ecdf_quantiles(ecdf_df: pd.DataFrame, by: str = "month",
                    quantiles=(0.05, 0.5, 0.95)) -> pd.DataFrame:
     """Read onset/median/offset (and any quantiles) off the mean ECDF curves."""
+    cols = [by, "scientific_name", "common_name", "quantile", "t_min", "n_mornings"]
+    if ecdf_df.empty:  # no morning cleared the detection floor -> nothing to read
+        return pd.DataFrame(columns=cols)
     rows = []
     for (per, sp), g in ecdf_df.groupby([by, "scientific_name"]):
         g = g.sort_values("t_min")

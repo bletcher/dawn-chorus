@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
-from dawnchorus.ecdf import _crossing, _ecdf_on_grid, _ks_stat, _wasserstein_1d
+from dawnchorus.ecdf import (_crossing, _ecdf_on_grid, _ks_stat, _wasserstein_1d,
+                             ecdf_quantiles)
 
 
 def test_ecdf_on_grid_is_monotone_and_reaches_one():
@@ -33,3 +35,10 @@ def test_wasserstein_equals_the_constant_shift():
     assert _wasserstein_1d(a, a) == 0.0
     # A pure translation by 10 has W1 distance exactly 10 (minutes).
     assert abs(_wasserstein_1d(a, a + 10.0) - 10.0) < 1e-9
+
+
+def test_ecdf_quantiles_on_empty_returns_empty_not_keyerror():
+    # Sparse input (no morning cleared the detection floor) -> empty ECDF frame.
+    out = ecdf_quantiles(pd.DataFrame(), by="month")
+    assert out.empty
+    assert "month" in out.columns  # shaped, so downstream .to_csv/consumers are safe
