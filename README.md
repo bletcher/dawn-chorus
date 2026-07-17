@@ -9,33 +9,33 @@ hardware, no forking your station — and emits tidy tables + reference plots.
 
 ## Getting the data: a BirdNET station
 
-`dawnchorus` is the **analysis half**. It assumes something is already listening at your
-site and logging timestamped detections to SQLite. That capture half is a solved
-problem — you don't need to build it, and you don't need Merlin:
+`dawnchorus` is the **analysis half**. Something else does the listening and the species
+ID; this tool turns those timestamped detections into phenology. The capture half is a
+solved problem — you don't need to build it, and you don't need Merlin (Merlin Bird ID is
+a closed consumer app with **no public API**, so you can't pull timestamped detections out
+of it). Use **BirdNET** (same lab: the K. Lisa Yang Center at Cornell), via one of two
+paths — the tool reads both:
 
-* **Why not Merlin?** Merlin Bird ID (Cornell) is a closed consumer app with **no public
-  API** — there's no supported way to pull timestamped detections out of it for analysis.
-  It's superb for identifying a bird in the moment, but it isn't a data source you can
-  automate against.
-* **Use BirdNET instead.** BirdNET (same lab: the K. Lisa Yang Center at Cornell) is the
-  open acoustic model, and two turnkey projects run it unattended on cheap hardware and
-  write **every detection to a SQLite database** — exactly what this tool consumes:
-  * **[BirdNET-Pi](https://github.com/mcguirepr89/BirdNET-Pi)** / its maintained fork
-    **[BirdNET-Go](https://github.com/tphakala/birdnet-go)** — a Raspberry Pi (3B+/4/5 or
-    a Zero 2 W) + a USB or I²S microphone, listening 24/7. Web dashboard, live spectrograms,
-    and the detection DB this tool reads. BirdNET-Go also runs as a Docker container on any
-    always-on Linux box or mini-PC if you'd rather not use a Pi.
+* **Live station → SQLite** (`--db`). **[BirdNET-Pi](https://github.com/mcguirepr89/BirdNET-Pi)**
+  or its actively-maintained rewrite **[BirdNET-Go](https://github.com/tphakala/birdnet-go)**
+  runs on a Raspberry Pi (or Docker on any always-on box), listens 24/7, and writes **every
+  detection to a SQLite database** with a live dashboard. Point `dawnchorus --db` at that file.
+* **Batch recorder → BirdNET-Analyzer → tables** (`--from-analyzer`). Record only the dawn
+  window with a scheduled recorder (an **AudioMoth** or **Song Meter** on a sunrise-relative
+  schedule), then run **[BirdNET-Analyzer](https://github.com/birdnet-team/BirdNET-Analyzer)**
+  over the files offline. Point `dawnchorus --from-analyzer` at the folder of result tables;
+  it reconstructs each detection's wall-clock time from the recording's filename + the
+  within-file offset. This path keeps your **raw audio** for verification and reprocessing —
+  the better choice for research data, and it doesn't need a Pi running 24/7.
 
-**Minimum recipe:** a Raspberry Pi, a weatherproof USB mic (e.g. an AudioMoth used as a
-USB mic, a Clippy EM272, or any decent omnidirectional lavalier), power, and a roof/window
-the same spot all season. Flash the image, let it log for a few dawns, then point
-`dawnchorus` at the resulting `.db`. Keep the mic and its position **fixed** — detectability
-is part of what you're measuring, so moving the mic mid-season breaks comparability.
+Either way: keep the mic and its **position fixed** all season — detectability is part of
+what you're measuring, so moving it mid-season breaks comparability. Full hardware,
+config, and step-by-step guidance (incl. the batch pipeline and a parts list) is in
+[docs/station-setup.md](docs/station-setup.md).
 
-> A phone running the Merlin app on the porch will *show* you the chorus, but it won't give
-> you a queryable, timestamped record to compute onset/turnover from. If a phone is all you
-> have, record continuous audio and run the detections through BirdNET-Analyzer offline into
-> a database — but a dedicated always-on station is far less fuss.
+> **Timezone gotcha (batch path):** AudioMoth stamps filenames in **UTC** by default, while
+> `dawnchorus` treats detection times as station-local. Pass `--file-tz UTC` (with your
+> `--tz`) so onset isn't silently shifted by your whole UTC offset.
 
 ## Why this exists
 
@@ -70,9 +70,15 @@ python -m dawnchorus.cli --db demo.db --lat 42.53 --lon -72.53 \
     --tz America/New_York --min-confidence 0.6 \
     --weather --weather-cache demo_weather.csv --out results/
 
-# Your own station (fetches real weather from Open-Meteo):
+# Your own LIVE station (BirdNET-Pi/Go SQLite; fetches real weather from Open-Meteo):
 python -m dawnchorus.cli --db /path/to/birds.db --lat <LAT> --lon <LON> \
     --tz America/New_York --config config.example.yaml \
+    --weather --weather-cache mystation_weather.csv --out results/
+
+# Or the BATCH path: a folder of BirdNET-Analyzer result tables (e.g. AudioMoth recordings).
+# --file-tz tells it what timezone the recording filenames are stamped in (UTC for AudioMoth).
+python -m dawnchorus.cli --from-analyzer /path/to/results_dir --lat <LAT> --lon <LON> \
+    --tz America/New_York --file-tz UTC --min-confidence 0.65 \
     --weather --weather-cache mystation_weather.csv --out results/
 ```
 
@@ -195,7 +201,8 @@ and species ordering.
 
 ```text
 dawnchorus/
-  io.py          schema-detecting SQLite loader -> normalized frame
+  io.py          schema-detecting SQLite loader (BirdNET-Pi/Go) -> normalized frame
+  analyzer.py    BirdNET-Analyzer result-table loader (batch path) -> same frame
   solar.py       civil-dawn / sunrise anchoring (astral); polar day/night guard
   phenology.py   quantile onset / offset / span / occupancy per species-morning
   seasonal.py    composition drift + richness
