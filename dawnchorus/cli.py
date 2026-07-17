@@ -15,8 +15,9 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-from . import (load_detections, SolarModel, morning_summary, species_phenology,
-               fetch_hourly, morning_weather, attach_weather, weather_response)
+from . import (load_detections, load_birdnet_analyzer, SolarModel, morning_summary,
+               species_phenology, fetch_hourly, morning_weather, attach_weather,
+               weather_response)
 from .seasonal import composition, richness
 from .ecdf import species_ecdf, ecdf_quantiles, ecdf_distance
 from .phenology import DEFAULTS
@@ -33,11 +34,17 @@ def _load_config(path):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description="Dawn-chorus phenology from a BirdNET DB")
-    p.add_argument("--db", required=True)
+    p = argparse.ArgumentParser(description="Dawn-chorus phenology from BirdNET detections")
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--db", help="BirdNET-Pi/Go SQLite database (live-station path)")
+    src.add_argument("--from-analyzer", dest="from_analyzer",
+                     help="folder/file of BirdNET-Analyzer result tables (batch path)")
     p.add_argument("--lat", type=float, required=True)
     p.add_argument("--lon", type=float, required=True)
     p.add_argument("--tz", required=True, help="IANA tz, e.g. America/New_York")
+    p.add_argument("--file-tz", dest="file_tz", default=None,
+                   help="tz the recording FILENAMES are stamped in (e.g. UTC for AudioMoth); "
+                        "converted to --tz. Omit if filenames are already station-local.")
     p.add_argument("--min-confidence", type=float, default=0.5)
     p.add_argument("--config", default=None)
     p.add_argument("--weather", action="store_true", help="fetch + join Open-Meteo covariates")
@@ -49,8 +56,13 @@ def main(argv=None):
     cfg = _load_config(args.config)
     out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
 
-    det = load_detections(args.db, min_confidence=args.min_confidence,
-                          latitude=args.lat, longitude=args.lon)
+    if args.db:
+        det = load_detections(args.db, min_confidence=args.min_confidence,
+                              latitude=args.lat, longitude=args.lon)
+    else:
+        det = load_birdnet_analyzer(args.from_analyzer, min_confidence=args.min_confidence,
+                                    latitude=args.lat, longitude=args.lon,
+                                    tz=args.tz, file_tz=args.file_tz)
     solar = SolarModel(args.lat, args.lon, args.tz)
     det = solar.annotate(det)
     print(f"loaded {len(det):,} detections, {det['scientific_name'].nunique()} species, "
@@ -94,26 +106,31 @@ def main(argv=None):
     ax.figure.tight_layout(); ax.figure.savefig(out / "composition_area.png", dpi=130)
     plt.close(ax.figure)
 
-    # Empirical CDF of vocal activity (robust, full-distribution view)
+    # Empirical CDF of vocal activity (robust, full-distribution view). Empty when no
+    # morning cleared min_detections_per_morning (e.g. a tiny first-day sample).
     ecdf = species_ecdf(det, by="month", config=cfg)
-    eq = ecdf_quantiles(ecdf, by="month", quantiles=tuple(cfg.get("ecdf_quantiles", (0.05, 0.5, 0.95))))
-    ecdf.to_csv(out / "species_ecdf_month.csv", index=False)
-    eq.to_csv(out / "ecdf_quantiles_month.csv", index=False)
+    if ecdf.empty:
+        print("no morning met the ECDF detection floor "
+              "(min_detections_per_morning); skipping ECDF outputs")
+    else:
+        eq = ecdf_quantiles(ecdf, by="month", quantiles=tuple(cfg.get("ecdf_quantiles", (0.05, 0.5, 0.95))))
+        ecdf.to_csv(out / "species_ecdf_month.csv", index=False)
+        eq.to_csv(out / "ecdf_quantiles_month.csv", index=False)
 
-    # Consecutive-month timing shifts for the busiest species (descriptive)
-    months = sorted(ecdf["month"].unique())
-    top = (det.groupby("scientific_name").size().sort_values(ascending=False).head(6).index)
-    shifts = [ecdf_distance(det, sp, "month", a, b, cfg)
-              for sp in top for a, b in zip(months[:-1], months[1:])]
-    if shifts:
-        import pandas as _pd
-        _pd.DataFrame(shifts).to_csv(out / "ecdf_month_shifts.csv", index=False)
+        # Consecutive-month timing shifts for the busiest species (descriptive)
+        months = sorted(ecdf["month"].unique())
+        top = (det.groupby("scientific_name").size().sort_values(ascending=False).head(6).index)
+        shifts = [ecdf_distance(det, sp, "month", a, b, cfg)
+                  for sp in top for a, b in zip(months[:-1], months[1:])]
+        if shifts:
+            import pandas as _pd
+            _pd.DataFrame(shifts).to_csv(out / "ecdf_month_shifts.csv", index=False)
 
-    if len(months) > 1:
-        band = months[len(months) // 2]
-        fig = plots.ecdf_small_multiples(ecdf, by="month", anchor=anchor, band_for=band)
-        fig.savefig(out / "ecdf_by_month.png", dpi=130, bbox_inches="tight")
-        plt.close(fig)
+        if len(months) > 1:
+            band = months[len(months) // 2]
+            fig = plots.ecdf_small_multiples(ecdf, by="month", anchor=anchor, band_for=band)
+            fig.savefig(out / "ecdf_by_month.png", dpi=130, bbox_inches="tight")
+            plt.close(fig)
 
     if args.weather and "temperature_2m" in ms:
         ax = plots.onset_vs_temperature(ms, anchor=anchor)
