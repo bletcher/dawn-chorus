@@ -77,7 +77,8 @@ def main(argv=None):
 
     print(f"[2/2] building dashboard -> {args.out_site}  (counting >= {args.min_confidence})")
     data = build_site.build_data(analyzer_path=results, lat=args.lat, lon=args.lon,
-                                 tz=args.tz, min_conf=args.min_confidence, file_tz=args.file_tz)
+                                 tz=args.tz, min_conf=args.min_confidence, file_tz=args.file_tz,
+                                 audio_dir=args.audio)
     out = Path(args.out_site)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(build_site.render_html(data), encoding="utf-8")
