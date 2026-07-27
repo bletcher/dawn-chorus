@@ -24,6 +24,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import wave
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -33,8 +36,36 @@ import dawnchorus as dc
 from dawnchorus.phenology import DEFAULTS, _anchor_col
 
 
+def scan_audio(audio_dir, lat, lon, tz):
+    """Recordings -> {date: [{name, start-second-of-day, duration}]} plus the civil-dawn
+    second-of-day per date, so the page can turn a solar-minute back into file + offset."""
+    solar = dc.SolarModel(lat, lon, tz)
+    files = {}
+    for p in sorted(Path(audio_dir).glob("*.wav")):
+        m = re.search(r"(\d{8})_(\d{6})", p.name)
+        if not m:
+            continue
+        ymd, hms = m.group(1), m.group(2)
+        d = f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:8]}"
+        start = int(hms[:2]) * 3600 + int(hms[2:4]) * 60 + int(hms[4:6])
+        try:
+            with wave.open(str(p)) as w:
+                dur = round(w.getnframes() / w.getframerate(), 1)
+        except Exception:
+            dur = None
+        files.setdefault(d, []).append({"name": p.name, "s": start, "d": dur})
+    dawn = {}
+    for d in files:
+        y, mo, da = (int(x) for x in d.split("-"))
+        dw = solar.dawn(date(y, mo, da))
+        if dw is not None:
+            dawn[d] = dw.hour * 3600 + dw.minute * 60 + dw.second
+        files[d].sort(key=lambda f: f["s"])
+    return files, dawn
+
+
 def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
-               min_conf=0.5, file_tz=None):
+               min_conf=0.5, file_tz=None, audio_dir=None, audio_base="../data"):
     out = dc.run(db_path=db_path, analyzer_path=analyzer_path, latitude=lat, longitude=lon,
                  tz=tz, min_confidence=min_conf, file_tz=file_tz)
     det, ms = out["detections"], out["morning_summary"]
@@ -78,6 +109,15 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
     summary = json.loads(s[["date", "name", "sci", "n", "onset", "offset", "span",
                             "peak", "occ"]].to_json(orient="records"))
 
+    # Top few detections per (date, species) by confidence -> the audiogram lands on a real
+    # call. Each entry is [solar-minute, confidence].
+    clips = {}
+    if "confidence" in win.columns:
+        for (d, sp), g in win.groupby(["date", "common_name"]):
+            top = g.nlargest(3, "confidence")
+            clips.setdefault(str(d), {})[sp] = [[round(float(r[acol]), 2), round(float(r["confidence"]), 2)]
+                                                for _, r in top.iterrows()]
+
     valid = ms.dropna(subset=["onset_min"])
     earliest = None
     if not valid.empty:
@@ -95,8 +135,11 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
         "species": species,                                   # heatmap/ECDF order (earliest first)
         "top_species": [s for s in totals.index if s in heat_set],   # by detections (ECDF default + colour)
         "earliest": earliest,
+        "audio_base": audio_base,
     }
-    return {"meta": meta, "summary": summary, "counts": counts, "day_keys": day_keys}
+    audio, dawn = scan_audio(audio_dir, lat, lon, tz) if audio_dir else ({}, {})
+    return {"meta": meta, "summary": summary, "counts": counts, "day_keys": day_keys,
+            "audio": audio, "dawn": dawn, "clips": clips}
 
 
 def render_html(data: dict) -> str:
@@ -113,11 +156,16 @@ def main(argv=None):
     p.add_argument("--tz", required=True)
     p.add_argument("--file-tz", dest="file_tz", default=None)
     p.add_argument("--min-confidence", type=float, default=0.5)
+    p.add_argument("--audio", default=None,
+                   help="folder of WAV recordings (enables click-to-listen in daily scope)")
+    p.add_argument("--audio-url-base", dest="audio_base", default="../data",
+                   help="URL prefix the page uses to reach recordings (default ../data)")
     p.add_argument("--out", default="site/index.html")
     args = p.parse_args(argv)
 
     data = build_data(analyzer_path=args.from_analyzer, db_path=args.db, lat=args.lat,
-                      lon=args.lon, tz=args.tz, min_conf=args.min_confidence, file_tz=args.file_tz)
+                      lon=args.lon, tz=args.tz, min_conf=args.min_confidence, file_tz=args.file_tz,
+                      audio_dir=args.audio, audio_base=args.audio_base)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(data), encoding="utf-8")
@@ -198,6 +246,21 @@ TEMPLATE = r"""<!doctype html>
   .chip:focus-within{outline:2px solid var(--accent); outline-offset:2px}
   .plot{overflow-x:auto}
   .empty{color:var(--muted); font-size:14px; padding:22px 4px}
+  #spec{width:100%; height:200px; display:block; border-radius:6px; background:#08061a}
+  .specrow{display:flex; gap:8px; align-items:stretch; margin:2px 0 11px}
+  .freqax{display:flex; flex-direction:column; justify-content:space-between; width:40px; text-align:right; font-size:10px; color:var(--muted); padding:2px 2px}
+  .canvholder{position:relative; flex:1; min-width:0}
+  .playhead{position:absolute; top:0; bottom:0; left:0; width:2px; background:rgba(255,255,255,.85); display:none; pointer-events:none}
+  .audioctl{display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+  .pbtn{background:var(--accent); color:#fff; border:none; border-radius:7px; padding:6px 15px; font-size:13px; cursor:pointer}
+  .pbtn:hover{filter:brightness(1.07)}
+  .stepbtn{background:var(--surface); border:1px solid var(--line); color:var(--ink2); border-radius:6px; width:27px; height:27px; cursor:pointer; font-size:15px; line-height:1}
+  .stepbtn:disabled{opacity:.4; cursor:default}
+  .detidx{font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; min-width:30px; text-align:center}
+  .audioinfo{font-size:13px; color:var(--ink2); margin-top:9px; min-height:18px}
+  .audioinfo .mono{font-family:ui-monospace,"SFMono-Regular",Menlo,monospace; font-size:12px}
+  .listen{cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px}
+  .listen:hover{color:var(--accent)}
   table{border-collapse:collapse; width:100%; font-size:13px; font-variant-numeric:tabular-nums}
   thead th{text-align:right; color:var(--muted); font-weight:600; padding:7px 10px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--surface)}
   thead th:first-child, tbody td:first-child{text-align:left}
@@ -237,6 +300,24 @@ TEMPLATE = r"""<!doctype html>
     <span class="periodlabel" id="periodLabel"></span>
     <span class="scopehint">scopes every chart below</span>
   </div>
+
+  <section class="card audio" id="audioCard" hidden>
+    <h2 class="display">Listen</h2>
+    <p class="lead" id="audioLead"></p>
+    <div id="specWrap" hidden>
+      <div class="specrow">
+        <div class="freqax" id="freqax"><span></span><span></span><span></span></div>
+        <div class="canvholder"><canvas id="spec"></canvas><div class="playhead" id="playhead"></div></div>
+      </div>
+      <div class="audioctl">
+        <button class="pbtn" id="playBtn">▶&nbsp;Play</button>
+        <button class="stepbtn" id="prevDet" title="previous detection">‹</button>
+        <span class="detidx" id="detIdx"></span>
+        <button class="stepbtn" id="nextDet" title="next detection">›</button>
+      </div>
+    </div>
+    <div class="audioinfo" id="audioInfo"></div>
+  </section>
 
   <section class="card">
     <h2 class="display">Who sings when</h2>
@@ -289,6 +370,122 @@ const SPIDX = {}; meta.species.forEach((s,i)=> SPIDX[s]=i);
 // per (dayIdx|spIdx) -> dense bin-count array. The single building block for every chart.
 const BDS = {};
 counts.forEach(([di,si,bi,c])=>{ const k=di+"|"+si; (BDS[k] || (BDS[k]=new Float64Array(NB)))[bi]=c; });
+
+const AUDIO = DATA.audio || null, DAWN = DATA.dawn || {}, CLIPS = DATA.clips || {}, ABASE = meta.audio_base || "../data";
+const CLIP_SEC = 5.5, PRE = 0.5;                          // ~5s clip, 0.5s lead-in before the call
+const hasAudio = () => AUDIO && Object.keys(AUDIO).length > 0;
+const headerCache = {};
+let actx=null, srcNode=null, playRAF=null, cur=null;
+
+function secToClock(sec){ sec=Math.max(0,Math.round(sec)); const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s=sec%60;
+  return [h,m,s].map(v=>String(v).padStart(2,"0")).join(":"); }
+function setAudioInfo(html){ const e=document.getElementById("audioInfo"); if(e) e.innerHTML=html; }
+function showSpec(on){ const w=document.getElementById("specWrap"); if(w) w.hidden=!on; }
+
+async function fetchRange(url, s, e){
+  const r=await fetch(url, {headers:{Range:`bytes=${s}-${e}`}});
+  if(!(r.ok || r.status===206)) throw new Error("HTTP "+r.status);
+  return new DataView(await r.arrayBuffer()); }
+async function wavHeader(url){
+  if(headerCache[url]) return headerCache[url];
+  const dv=await fetchRange(url,0,65535); let off=12, fmt=null, dataOff=null, dataLen=null;
+  while(off+8<=dv.byteLength){
+    const id=String.fromCharCode(dv.getUint8(off),dv.getUint8(off+1),dv.getUint8(off+2),dv.getUint8(off+3));
+    const sz=dv.getUint32(off+4,true);
+    if(id==="fmt "){ fmt={channels:dv.getUint16(off+10,true), sampleRate:dv.getUint32(off+12,true), bits:dv.getUint16(off+22,true)}; }
+    else if(id==="data"){ dataOff=off+8; dataLen=sz; break; }
+    off+=8+sz+(sz&1); }
+  const h={channels:fmt&&fmt.channels, sampleRate:fmt&&fmt.sampleRate, bits:fmt&&fmt.bits, dataOff, dataLen};
+  headerCache[url]=h; return h; }
+async function loadPcm(url, startSec, durSec){
+  const h=await wavHeader(url);
+  if(h.dataOff==null || h.bits!==16) throw new Error("need 16-bit WAV");
+  const bpf=h.channels*2, sr=h.sampleRate;
+  let s=h.dataOff+Math.floor(startSec*sr)*bpf, e=h.dataOff+Math.ceil((startSec+durSec)*sr)*bpf-1;
+  e=Math.min(e, h.dataOff+h.dataLen-1); if(s<h.dataOff) s=h.dataOff;
+  const dv=await fetchRange(url,s,e); const n=Math.floor(dv.byteLength/bpf); const out=new Float32Array(n);
+  for(let i=0;i<n;i++) out[i]=dv.getInt16(i*bpf,true)/32768;         // channel 0
+  return {samples:out, sampleRate:sr}; }
+
+function fft(re, im){ const n=re.length;
+  for(let i=1,j=0;i<n;i++){ let bit=n>>1; for(;j&bit;bit>>=1) j^=bit; j^=bit;
+    if(i<j){ const tr=re[i]; re[i]=re[j]; re[j]=tr; const ti=im[i]; im[i]=im[j]; im[j]=ti; } }
+  for(let len=2;len<=n;len<<=1){ const ang=-2*Math.PI/len, wr=Math.cos(ang), wi=Math.sin(ang);
+    for(let i=0;i<n;i+=len){ let cr=1, ci=0;
+      for(let k=0;k<len/2;k++){ const ar=re[i+k], ai=im[i+k],
+          br=re[i+k+len/2]*cr-im[i+k+len/2]*ci, bi=re[i+k+len/2]*ci+im[i+k+len/2]*cr;
+        re[i+k]=ar+br; im[i+k]=ai+bi; re[i+k+len/2]=ar-br; im[i+k+len/2]=ai-bi;
+        const ncr=cr*wr-ci*wi; ci=cr*wi+ci*wr; cr=ncr; } } } }
+const MAGMA=[[0,0,4],[40,11,84],[101,21,110],[159,42,99],[212,72,66],[245,125,21],[250,193,39],[252,255,164]];
+function magma(v){ v=v>0?(v<1?v:1):0; const x=v*(MAGMA.length-1), i=Math.floor(x), f=x-i, a=MAGMA[i], b=MAGMA[Math.min(i+1,MAGMA.length-1)];
+  return [a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f]; }
+function drawSpec(samples, sr){
+  const canvas=document.getElementById("spec"), holder=canvas.parentElement;
+  const W=canvas.width=Math.max(320, holder.clientWidth), H=canvas.height=200;
+  const N=1024, hop=256, win=new Float32Array(N);
+  for(let i=0;i<N;i++) win[i]=0.5-0.5*Math.cos(2*Math.PI*i/(N-1));
+  const frames=Math.max(1, Math.floor((samples.length-N)/hop)+1), bins=N/2,
+        nyq=sr/2, maxF=Math.min(12000,nyq), maxBin=Math.max(1, Math.round(maxF/nyq*bins));
+  const mag=new Float32Array(frames*maxBin), re=new Float32Array(N), im=new Float32Array(N);
+  let mn=Infinity, mx=-Infinity;
+  for(let fr=0;fr<frames;fr++){ const s0=fr*hop;
+    for(let i=0;i<N;i++){ re[i]=(samples[s0+i]||0)*win[i]; im[i]=0; }
+    fft(re,im);
+    for(let b=0;b<maxBin;b++){ const m=Math.log10(1e-7+re[b]*re[b]+im[b]*im[b]); mag[fr*maxBin+b]=m; if(m<mn)mn=m; if(m>mx)mx=m; } }
+  const rng=(mx-mn)||1, ctx=canvas.getContext("2d"), img=ctx.createImageData(W,H);
+  for(let x=0;x<W;x++){ const fr=Math.min(frames-1, Math.floor(x/W*frames));
+    for(let y=0;y<H;y++){ const b=Math.min(maxBin-1, Math.floor((1-y/H)*maxBin));
+      let v=(mag[fr*maxBin+b]-mn)/rng; v=v>0?(v<1?v:1):0; v=Math.pow(v,1.4);
+      const c=magma(v), idx=(y*W+x)*4; img.data[idx]=c[0]; img.data[idx+1]=c[1]; img.data[idx+2]=c[2]; img.data[idx+3]=255; } }
+  ctx.putImageData(img,0,0);
+  const ax=document.getElementById("freqax");
+  if(ax){ ax.children[0].textContent=(maxF/1000).toFixed(0)+" kHz"; ax.children[1].textContent=(maxF/2000).toFixed(0); ax.children[2].textContent="0"; } }
+
+function playClip(){ if(!cur||!cur.clip) return;
+  const ctx=actx||(actx=new (window.AudioContext||window.webkitAudioContext)());
+  if(srcNode){ try{srcNode.stop()}catch(e){} }
+  const {samples,sampleRate}=cur.clip, buf=ctx.createBuffer(1,samples.length,sampleRate); buf.copyToChannel(samples,0);
+  srcNode=ctx.createBufferSource(); srcNode.buffer=buf; srcNode.connect(ctx.destination);
+  const dur=samples.length/sampleRate, ph=document.getElementById("playhead"), t0=ctx.currentTime;
+  ph.style.display="block"; srcNode.start(); cancelAnimationFrame(playRAF);
+  (function tick(){ const el=(ctx.currentTime-t0)/dur; if(el>=1){ ph.style.display="none"; return; } ph.style.left=(el*100)+"%"; playRAF=requestAnimationFrame(tick); })();
+  srcNode.onended=()=>{ ph.style.display="none"; }; }
+
+async function loadCurrent(){
+  const {day,name,dets,idx}=cur, t=dets[idx][0], c=dets[idx][1], files=AUDIO[day], dawnSec=DAWN[day];
+  if(!files || dawnSec==null){ setAudioInfo(`No recording for ${day}.`); showSpec(false); return; }
+  const abs=dawnSec + t*60, f=files.find(f=>f.d!=null && abs>=f.s && abs<f.s+f.d) || files.find(f=>abs>=f.s) || files[0];
+  const startOff=Math.max(0, (abs - f.s) - PRE);
+  setAudioInfo(`loading… <span class="mono">${f.name}</span>`);
+  try{ cur.clip=await loadPcm(`${ABASE}/${encodeURIComponent(f.name)}`, startOff, CLIP_SEC);
+    showSpec(true); drawSpec(cur.clip.samples, cur.clip.sampleRate);
+    document.getElementById("detIdx").textContent=`${idx+1}/${dets.length}`;
+    document.getElementById("prevDet").disabled=idx<=0; document.getElementById("nextDet").disabled=idx>=dets.length-1;
+    setAudioInfo(`<strong>${name}</strong> · ${secToClock(abs)} local · conf ${c.toFixed(2)} · <span class="mono">${f.name}</span> @ ${(abs-f.s).toFixed(0)}s`);
+  }catch(e){ showSpec(false); setAudioInfo(`Couldn't load audio (${e.message}). Serve with <code>python tools/serve.py</code>, open <code>/site/</code>.`); } }
+
+async function openAudioFor(name){
+  const S=scopedDays(); if(!hasAudio() || S.length!==1) return;
+  const day=S[0], dets=(CLIPS[day]||{})[name];
+  document.getElementById("audioCard").scrollIntoView({behavior:"smooth", block:"nearest"});
+  if(!dets || !dets.length){ showSpec(false); setAudioInfo(`No detections to play for ${name} on ${day}.`); return; }
+  cur={day, name, dets, idx:0}; await loadCurrent(); }
+
+function wireAudioClicks(el, S){
+  if(!hasAudio() || S.length!==1) return;
+  const names=new Set(summary.filter(r=>r.date===S[0]).map(r=>r.name));
+  el.querySelectorAll("text").forEach(t=>{ if(names.has(t.textContent)){
+    t.style.cursor="pointer"; t.style.textDecoration="underline dotted";
+    t.addEventListener("click", ()=>openAudioFor(t.textContent)); } });
+}
+function updateAudioCard(S){
+  const card=document.getElementById("audioCard"); if(!card) return;
+  if(!hasAudio()){ card.hidden=true; return; }
+  card.hidden=false;
+  document.getElementById("audioLead").innerHTML = S.length===1
+    ? `Click a species (chart or table) to see its <strong>spectrogram</strong> at a strong detection on <strong>${S[0]}</strong>, then play it — check BirdNET's call by ear.`
+    : `Set the time scope to a single day (<strong>Daily</strong>) to view spectrograms.`;
+}
 
 const median = a => { const s=a.filter(v=>v!=null).sort((x,y)=>x-y), n=s.length;
   return n ? (n%2 ? s[(n-1)/2] : (s[n/2-1]+s[n/2])/2) : null; };
@@ -355,6 +552,7 @@ function renderTimeline(S){
       Plot.tip(rows, Plot.pointerY({x:"onset", y:"name",
         title:d=>`${d.name}\nonset ${fmt(d.onset,0)}  offset ${fmt(d.offset,0)} min\nspan ${fmt(d.offset-d.onset,0)} · occ ${fmt(d.occ,2)}\n${d.n} detections over ${d.mornings} morning(s)`}))
     ]}));
+  wireAudioClicks(el, S);
 }
 
 function renderEcdf(S){
@@ -398,6 +596,7 @@ function renderHeat(S){
         title:d=>`${d.name}\n${fmt(d.t,0)} min · ${Math.round(d.occ*100)}% of mornings`}),
       Plot.ruleX([0], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"})
     ]}));
+  wireAudioClicks(el, S);
 }
 
 function renderTable(S){
@@ -408,11 +607,14 @@ function renderTable(S){
       span:median(rs.map(r=>r.span)), peak:median(rs.map(r=>r.peak)), occ:median(rs.map(r=>r.occ))};
   }).sort((a,b)=> (a.onset==null)-(b.onset==null) || (a.onset-b.onset) || (b.n-a.n));
   const head=["Species","mornings","n","onset","offset","span","peak","occ"];
-  const body=rows.map(d=>`<tr><td>${d.name}</td><td>${d.mornings}</td><td>${d.n}</td>`+
+  const clickable = hasAudio() && S.length===1;
+  const cell = d => clickable ? `<span class="listen" data-sp="${d.name}">${d.name}</span>` : d.name;
+  const body=rows.map(d=>`<tr><td>${cell(d)}</td><td>${d.mornings}</td><td>${d.n}</td>`+
     `<td>${fmt(d.onset,0)}</td><td>${fmt(d.offset,0)}</td><td>${fmt(d.span,0)}</td>`+
     `<td>${fmt(d.peak,0)}</td><td>${fmt(d.occ,2)}</td></tr>`).join("");
-  document.getElementById("tbl").innerHTML =
-    `<thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
+  const tbl=document.getElementById("tbl");
+  tbl.innerHTML = `<thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
+  if(clickable) tbl.querySelectorAll(".listen").forEach(s=> s.addEventListener("click", ()=>openAudioFor(s.dataset.sp)));
 }
 
 function renderFoot(){ document.getElementById("foot").innerHTML =
@@ -431,14 +633,17 @@ function buildChips(){
 }
 
 function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S);
-  renderTimeline(S); renderEcdf(S); renderHeat(S); renderTable(S); }
+  renderTimeline(S); renderEcdf(S); renderHeat(S); renderTable(S); updateAudioCard(S); }
 
 aggSel.onchange = rebuildPeriods;
-slider.oninput = ()=>{ const S=scopedDays(); updateScopeLabel(S); renderTimeline(S); renderEcdf(S); renderHeat(S); renderTable(S); };
-document.getElementById("theme").onclick = ()=>{ const cur=root.getAttribute("data-theme") ||
-    (matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"); root.setAttribute("data-theme", cur==="dark"?"light":"dark"); renderAll(); };
+slider.oninput = renderAll;
+document.getElementById("playBtn").onclick = playClip;
+document.getElementById("prevDet").onclick = ()=>{ if(cur && cur.idx>0){ cur.idx--; loadCurrent(); } };
+document.getElementById("nextDet").onclick = ()=>{ if(cur && cur.idx<cur.dets.length-1){ cur.idx++; loadCurrent(); } };
+document.getElementById("theme").onclick = ()=>{ const curTheme=root.getAttribute("data-theme") ||
+    (matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"); root.setAttribute("data-theme", curTheme==="dark"?"light":"dark"); renderAll(); };
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", ()=>{ if(!root.hasAttribute("data-theme")) renderAll(); });
-let rz; addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(renderAll, 180); });
+let rz; addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(()=>{ renderAll(); if(cur&&cur.clip) drawSpec(cur.clip.samples, cur.clip.sampleRate); }, 180); });
 
 renderSubline(); renderTiles(); renderFoot(); buildChips(); rebuildPeriods();
 </script>
