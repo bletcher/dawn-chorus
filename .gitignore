@@ -20,6 +20,9 @@ results/
 *.wav
 *.flac
 
+# Local processing state (machine-specific mtimes)
+manifest.json
+
 # Keep the example config despite the csv rule above
 !config.example.yaml
 

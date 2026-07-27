@@ -197,6 +197,29 @@ positives, the ECDF primitives, and an **end-to-end regression test** that build
 synthetic station and checks the pipeline recovers the planted temperature→onset signal
 and species ordering.
 
+## Dashboard
+
+Turn a processed folder into an interactive site — dawn timeline, cumulative-call ECDF,
+occupancy heatmap, and per-species table, all governed by one **Aggregate + Period** time
+scope (day/week/month/year), with **click-to-listen** back to the recordings in daily view:
+
+```bash
+# recordings -> BirdNET-Analyzer -> dashboard, in one command
+python tools/process_cards.py --audio data --lat 42.53 --lon -72.53 --tz America/New_York
+
+# or process only NEW recordings on request (manifest-tracked), then rebuild
+python tools/track.py process --audio data --lat 42.53 --lon -72.53 \
+    --tz America/New_York --rebuild-site
+
+# view it — range server lets the audio seek; open http://127.0.0.1:8000/site/
+python tools/serve.py
+```
+
+The page uses the Observable Plot *library*, vendored under `site/vendor/` — no CDN, no
+platform, opens offline. Click-to-listen needs the recordings served (that's what
+`serve.py` is for; it serves the repo root so `/data/` recordings are reachable). Build a
+one-off directly with `tools/build_site.py --from-analyzer <results> --audio <wavs> …`.
+
 ## Layout
 
 ```text
@@ -212,7 +235,12 @@ dawnchorus/
   cli.py         end-to-end runner
 tools/
   make_synthetic_db.py   demo DB + mock weather cache (temp-driven onset)
+  process_cards.py       one command: recordings -> BirdNET-Analyzer -> dashboard
+  track.py               manifest tracking: analyse only NEW recordings on request
+  build_site.py          generate the interactive dashboard (Observable Plot, vendored)
+  serve.py               range-capable dev server (audio seeking) for the dashboard
 tests/           pytest suite (unit + end-to-end signal-recovery)
+site/            generated dashboard + vendored d3/Plot (open site/index.html)
 ```
 
 MIT. BirdNET model and station software are separate projects by their authors
