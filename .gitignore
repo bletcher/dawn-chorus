@@ -16,6 +16,10 @@ env/
 *_weather.csv
 results/
 
+# Raw audio recordings — huge, belong in cold storage, never in git
+*.wav
+*.flac
+
 # Keep the example config despite the csv rule above
 !config.example.yaml
 
