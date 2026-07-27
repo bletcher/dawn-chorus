@@ -1,22 +1,24 @@
 """
 Build a self-contained dawn-chorus dashboard (Observable Plot) from a detection source.
 
-Runs the dawnchorus pipeline, then writes a single HTML file with the data embedded
-and interactive charts:
-  * Dawn timeline   - onset->offset range per species for a morning, coloured by occupancy
-  * Cumulative call distributions (ECDF) - F(t) per species, the robust full-distribution view
-  * Occupancy heatmap - species x solar-minute, fraction of mornings singing
-  * Species table
+Runs the dawnchorus pipeline, then writes a single HTML file with the data embedded and
+interactive charts, all governed by one global **time scope** (Aggregate: day/week/month/
+year + a period slider). Move the slider and every chart recomputes for that set of mornings:
+  * Dawn timeline   - median onset->offset per species, coloured by median occupancy
+  * Cumulative call distributions (ECDF) - mean of the period's per-morning curves
+  * Occupancy heatmap - species x solar-minute, fraction of the period's mornings singing
+  * Species table   - per-species aggregates over the period
 
-Uses the Observable Plot *library* (vendored locally at `site/vendor/plot.umd.min.js`) --
-no Observable platform/account, no CDN, no build step, no server. Just open the file, or
-host the `site/` folder anywhere.
+The page holds only per-morning building blocks (per-species-per-bin detection counts and a
+per-morning onset/offset summary); the browser aggregates them up to the chosen grain, so the
+same file explores day-to-day detail or seasonal roll-ups without regenerating.
+
+Uses the Observable Plot *library* (vendored locally at `site/vendor/`) -- no Observable
+platform/account, no CDN, no build step, no server. Just open the file, or host `site/`.
 
     python tools/build_site.py --from-analyzer data/results \
         --lat 42.53 --lon -72.53 --tz America/New_York --min-confidence 0.5 \
         --out site/index.html
-
-Re-run whenever new mornings come in; it regenerates the page in place.
 """
 from __future__ import annotations
 
@@ -35,70 +37,66 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
                min_conf=0.5, file_tz=None):
     out = dc.run(db_path=db_path, analyzer_path=analyzer_path, latitude=lat, longitude=lon,
                  tz=tz, min_confidence=min_conf, file_tz=file_tz)
-    det, ms, ec = out["detections"], out["morning_summary"], out["species_ecdf_month"]
+    det, ms = out["detections"], out["morning_summary"]
 
     cfg = DEFAULTS
     acol = _anchor_col(cfg["anchor"])            # min_from_dawn
     lo, hi, bw = cfg["window_start_min"], cfg["window_end_min"], cfg["bin_min"]
     win = det[(det[acol] >= lo) & (det[acol] < hi)].copy()
 
-    mornings = sorted(str(d) for d in pd.unique(ms["date"]))
-    n_morn = max(1, win["date"].nunique())
-
-    # Occupancy grid: fraction of mornings a species is present in each 5-min bin.
     edges = np.arange(lo, hi + bw, bw)
-    win["bin"] = pd.cut(win[acol], edges, labels=edges[:-1])
-    grid = (win.groupby(["common_name", "bin"], observed=True)["date"].nunique()
-            .unstack(fill_value=0) / n_morn)
+    nbins = len(edges) - 1
+    grid = [round(float(edges[i]) + bw / 2.0, 1) for i in range(nbins)]   # bin centres
+    win["bin"] = pd.cut(win[acol], edges, labels=False)                   # 0..nbins-1
 
     totals = win.groupby("common_name").size().sort_values(ascending=False)
-    heat_species_set = {s for s in totals.index if totals[s] >= 5}
-    mean_t = win.groupby("common_name")[acol].mean().sort_values()   # earliest first
-    heat_order = [s for s in mean_t.index if s in heat_species_set]
+    heat_set = {s for s in totals.index if totals[s] >= 5}
+    mean_t = win.groupby("common_name")[acol].mean().sort_values()        # earliest first
+    species = [s for s in mean_t.index if s in heat_set]
+    sp_idx = {s: i for i, s in enumerate(species)}
 
-    occ_rows = []
-    for sp in heat_order:
-        for b, val in grid.loc[sp].items():
-            if val > 0:
-                occ_rows.append({"name": sp, "t": float(b) + bw / 2.0, "occ": round(float(val), 3)})
+    # Per-morning, per-species, per-bin detection COUNTS -- the one building block the page
+    # aggregates up to any grain (occupancy, mean-of-morning ECDF, quantile onset/offset).
+    hs = win[win["common_name"].isin(heat_set)].dropna(subset=["bin"]).copy()
+    hs["bin"] = hs["bin"].astype(int)
+    days = sorted(str(d) for d in hs["date"].unique())
+    day_idx = {d: i for i, d in enumerate(days)}
+    cnt = hs.groupby(["date", "common_name", "bin"]).size()
+    counts = [[day_idx[str(d)], sp_idx[s], int(b), int(c)] for (d, s, b), c in cnt.items()]
+
+    day_keys = {}
+    for d in days:
+        ts = pd.Timestamp(d); iso = ts.isocalendar()
+        day_keys[d] = {"year": f"{ts.year}", "month": f"{ts.year}-{ts.month:02d}",
+                       "week": f"{int(iso[0])}-W{int(iso[1]):02d}", "day": d}
 
     s = ms.rename(columns={"scientific_name": "sci", "common_name": "name",
                            "n_detections": "n", "onset_min": "onset", "offset_min": "offset",
-                           "span_min": "span", "peak_min": "peak", "occupancy": "occ",
-                           "raw_first_min": "first", "raw_last_min": "last"})
+                           "span_min": "span", "peak_min": "peak", "occupancy": "occ"})
     s["date"] = s["date"].astype(str)
-    s = s.round({"onset": 1, "offset": 1, "span": 1, "peak": 1, "occ": 2, "first": 1, "last": 1})
+    s = s.round({"onset": 1, "offset": 1, "span": 1, "peak": 1, "occ": 2})
     summary = json.loads(s[["date", "name", "sci", "n", "onset", "offset", "span",
-                            "peak", "occ", "first", "last"]].to_json(orient="records"))
-
-    if ec is not None and not ec.empty:
-        e = ec.rename(columns={"common_name": "name", "t_min": "t", "F_p25": "lo", "F_p75": "hi"})
-        e = e.round({"t": 1, "F": 4, "lo": 4, "hi": 4})
-        ecdf = json.loads(e[["name", "t", "F", "lo", "hi"]].to_json(orient="records"))
-        ecdf_species = list(dict.fromkeys(e["name"]))
-    else:
-        ecdf, ecdf_species = [], []
+                            "peak", "occ"]].to_json(orient="records"))
 
     valid = ms.dropna(subset=["onset_min"])
     earliest = None
     if not valid.empty:
         r = valid.loc[valid["onset_min"].idxmin()]
-        earliest = {"name": r["common_name"], "onset": round(float(r["onset_min"]), 1),
-                    "date": str(r["date"])}
+        earliest = {"name": r["common_name"], "onset": round(float(r["onset_min"]), 1)}
 
     meta = {
-        "mornings": mornings,
+        "mornings": sorted(str(d) for d in pd.unique(ms["date"])),
+        "days": days,
         "n_species": int(det["scientific_name"].nunique()),
         "n_detections": int(len(det)),
         "min_confidence": min_conf,
         "lat": lat, "lon": lon, "tz": tz,
-        "anchor": cfg["anchor"], "window": [lo, hi], "bin": bw,
+        "window": [lo, hi], "bin": bw, "grid": grid,
+        "species": species,                                   # heatmap/ECDF order (earliest first)
+        "top_species": [s for s in totals.index if s in heat_set],   # by detections (ECDF default + colour)
         "earliest": earliest,
-        "heat_species": heat_order,
-        "ecdf_species": ecdf_species,
-        "top_species": list(totals.index),
     }
-    return {"meta": meta, "summary": summary, "ecdf": ecdf, "occ": occ_rows}
+    return {"meta": meta, "summary": summary, "counts": counts, "day_keys": day_keys}
 
 
 def render_html(data: dict) -> str:
@@ -142,6 +140,7 @@ TEMPLATE = r"""<!doctype html>
     --grid:#e2e7ee; --line:#d6dde6; --accent:#2a78d6; --dawn:#c26a1b;
     --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
     --seq-lo:#e7f0fb; --seq-hi:#12508f;
+    --scope:#e6eef9;
     --shadow:0 1px 2px rgba(15,22,34,.06), 0 8px 24px rgba(15,22,34,.06);
     color-scheme:light;
   }
@@ -149,20 +148,19 @@ TEMPLATE = r"""<!doctype html>
     --bg:#0b0f16; --surface:#141a23; --ink:#eef2f8; --ink2:#aab4c2; --muted:#7c8695;
     --grid:#232b37; --line:#2b3542; --accent:#3987e5; --dawn:#e0913f;
     --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
-    --seq-lo:#172433; --seq-hi:#7db0ec; --shadow:0 1px 2px rgba(0,0,0,.4);
+    --seq-lo:#172433; --seq-hi:#7db0ec; --scope:#161f2e; --shadow:0 1px 2px rgba(0,0,0,.4);
     color-scheme:dark;
   }}
   :root[data-theme="dark"]{
     --bg:#0b0f16; --surface:#141a23; --ink:#eef2f8; --ink2:#aab4c2; --muted:#7c8695;
     --grid:#232b37; --line:#2b3542; --accent:#3987e5; --dawn:#e0913f;
     --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
-    --seq-lo:#172433; --seq-hi:#7db0ec; --shadow:0 1px 2px rgba(0,0,0,.4);
+    --seq-lo:#172433; --seq-hi:#7db0ec; --scope:#161f2e; --shadow:0 1px 2px rgba(0,0,0,.4);
     color-scheme:dark;
   }
   *{box-sizing:border-box}
   body{margin:0; background:var(--bg); color:var(--ink);
-    font:400 15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    -webkit-font-smoothing:antialiased;}
+    font:400 15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased;}
   .wrap{max-width:1080px; margin:0 auto; padding:28px 20px 64px}
   .display{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,ui-serif,serif;}
   header.masthead{display:flex; justify-content:space-between; align-items:flex-end; gap:16px;
@@ -173,39 +171,42 @@ TEMPLATE = r"""<!doctype html>
   button.theme{background:var(--surface); color:var(--ink2); border:1px solid var(--line);
     border-radius:8px; padding:7px 11px; font-size:13px; cursor:pointer; white-space:nowrap}
   button.theme:hover{border-color:var(--accent); color:var(--ink)}
-  .tiles{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:24px}
-  .tile{background:var(--surface); border:1px solid var(--line); border-radius:10px;
-    padding:13px 15px; box-shadow:var(--shadow)}
+  .tiles{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px}
+  .tile{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:13px 15px; box-shadow:var(--shadow)}
   .tile .k{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em}
   .tile .v{font-size:26px; font-weight:600; margin-top:3px; font-variant-numeric:tabular-nums}
   .tile .v small{font-size:13px; color:var(--ink2); font-weight:500}
-  section.card{background:var(--surface); border:1px solid var(--line); border-radius:12px;
-    padding:18px 18px 8px; margin-bottom:20px; box-shadow:var(--shadow)}
-  .card h2{font-size:19px; margin:0 0 3px; letter-spacing:-.01em}
-  .card .lead{color:var(--ink2); font-size:13.5px; margin:0 0 14px; max-width:62ch}
-  .controls{display:flex; flex-wrap:wrap; gap:14px 18px; align-items:center; margin-bottom:12px}
+  .scopebar{position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:16px 20px;
+    flex-wrap:wrap; background:var(--scope); border:1px solid var(--line); border-radius:11px;
+    padding:12px 16px; margin-bottom:22px; box-shadow:var(--shadow); backdrop-filter:saturate(1.2)}
+  .scopebar .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.09em; color:var(--muted); font-weight:600}
+  .periodlabel{font-size:14px; color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap}
+  .scopehint{margin-left:auto; font-size:12px; color:var(--muted)}
   label.ctl{font-size:13px; color:var(--ink2); display:flex; align-items:center; gap:7px}
-  select{font:inherit; font-size:13px; padding:5px 8px; border-radius:7px; border:1px solid var(--line);
-    background:var(--surface); color:var(--ink)}
+  label.ctl.grow{flex:1; min-width:220px}
+  select{font:inherit; font-size:13px; padding:5px 8px; border-radius:7px; border:1px solid var(--line); background:var(--surface); color:var(--ink)}
+  input[type=range]{flex:1; accent-color:var(--accent); cursor:pointer; min-width:140px}
+  input[type=range]:disabled{opacity:.45; cursor:default}
+  section.card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px 18px 8px; margin-bottom:20px; box-shadow:var(--shadow)}
+  .card h2{font-size:19px; margin:0 0 3px; letter-spacing:-.01em}
+  .card .lead{color:var(--ink2); font-size:13.5px; margin:0 0 14px; max-width:64ch}
+  .controls{display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; margin-bottom:12px}
   .chips{display:flex; flex-wrap:wrap; gap:7px}
-  .chip{font-size:12.5px; border:1px solid var(--line); border-radius:999px; padding:4px 10px;
-    cursor:pointer; color:var(--ink2); user-select:none; background:var(--surface)}
+  .chip{font-size:12.5px; border:1px solid var(--line); border-radius:999px; padding:4px 10px; cursor:pointer; color:var(--ink2); user-select:none; background:var(--surface)}
   .chip input{position:absolute; opacity:0; width:0; height:0}
   .chip.on{background:var(--accent); border-color:var(--accent); color:#fff}
   .chip:focus-within{outline:2px solid var(--accent); outline-offset:2px}
   .plot{overflow-x:auto}
   .empty{color:var(--muted); font-size:14px; padding:22px 4px}
   table{border-collapse:collapse; width:100%; font-size:13px; font-variant-numeric:tabular-nums}
-  thead th{text-align:right; color:var(--muted); font-weight:600; padding:7px 10px;
-    border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--surface)}
+  thead th{text-align:right; color:var(--muted); font-weight:600; padding:7px 10px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--surface)}
   thead th:first-child, tbody td:first-child{text-align:left}
   tbody td{padding:6px 10px; border-bottom:1px solid var(--grid)}
   tbody tr:hover{background:color-mix(in srgb, var(--accent) 7%, transparent)}
-  .tableScroll{max-height:420px; overflow:auto; border:1px solid var(--grid); border-radius:8px}
+  .tableScroll{max-height:440px; overflow:auto; border:1px solid var(--grid); border-radius:8px}
   footer{color:var(--muted); font-size:12.5px; margin-top:26px; line-height:1.7}
   footer a{color:var(--accent)}
-  figure{margin:0}
-  @media (max-width:720px){ .tiles{grid-template-columns:repeat(2,1fr)} h1{font-size:27px} }
+  @media (max-width:720px){ .tiles{grid-template-columns:repeat(2,1fr)} h1{font-size:27px} .scopehint{display:none} }
 </style>
 </head>
 <body>
@@ -220,37 +221,52 @@ TEMPLATE = r"""<!doctype html>
 
   <div class="tiles" id="tiles"></div>
 
+  <div class="scopebar">
+    <span class="eyebrow">Time&nbsp;scope</span>
+    <label class="ctl">Aggregate
+      <select id="aggSel">
+        <option value="day">Daily</option>
+        <option value="week">Weekly</option>
+        <option value="month">Monthly</option>
+        <option value="year">Yearly</option>
+      </select>
+    </label>
+    <label class="ctl grow">Period
+      <input type="range" id="periodSlider" min="0" max="0" step="1" value="0" aria-label="Period">
+    </label>
+    <span class="periodlabel" id="periodLabel"></span>
+    <span class="scopehint">scopes every chart below</span>
+  </div>
+
   <section class="card">
     <h2 class="display">Who sings when</h2>
-    <p class="lead">Each bar spans a species' vocal activity for the chosen morning &mdash; from onset
-      (5th percentile of detection times) to offset (95th) &mdash; in minutes from <span class="tag">civil
-      dawn</span> (the dashed line). Darker bars are sung more continuously; the tick marks the busiest minute.</p>
-    <div class="controls">
-      <label class="ctl">Morning <select id="morningSel"></select></label>
-    </div>
+    <p class="lead">Each bar spans a species' vocal activity &mdash; onset (5th percentile of detection
+      times) to offset (95th) &mdash; in minutes from <span class="tag">civil dawn</span> (dashed line),
+      taken as the <em>median across the scoped period's mornings</em>. Darker bars are sung more
+      continuously; the tick marks the median busiest minute.</p>
     <div class="plot" id="chart-timeline"></div>
   </section>
 
   <section class="card">
     <h2 class="display">Cumulative call distributions</h2>
-    <p class="lead">The empirical CDF <em>F(t)</em> &mdash; the share of a species' detections that have
-      occurred by each minute. Onset reads off where a curve crosses 0.05, median song-time at 0.5, offset
-      at 0.95. Robust by construction: one stray detection shifts a curve by only 1/n.</p>
+    <p class="lead">The empirical CDF <em>F(t)</em> &mdash; share of a species' detections that have
+      occurred by each minute &mdash; averaged across the period's mornings (each morning a replicate).
+      Onset reads where a curve crosses 0.05, median song-time at 0.5, offset at 0.95.</p>
     <div class="controls"><div class="chips" id="ecdfChips"></div></div>
     <div class="plot" id="chart-ecdf"></div>
   </section>
 
   <section class="card">
     <h2 class="display">Occupancy across the morning</h2>
-    <p class="lead">Species &times; solar-minute. Colour is the fraction of mornings a species was detected
-      in each 5-minute bin &mdash; a map of the chorus filling in and thinning out around dawn.</p>
+    <p class="lead">Species &times; solar-minute. Colour is the fraction of the scoped period's mornings
+      a species was detected in each 5-minute bin &mdash; slide the time scope to watch the chorus shift.</p>
     <div class="plot" id="chart-heat"></div>
   </section>
 
   <section class="card">
     <h2 class="display">Per-species table</h2>
-    <p class="lead">Every species for the chosen morning. Onset/offset/span in minutes from civil dawn;
-      occupancy is the share of active bins between onset and offset.</p>
+    <p class="lead">Aggregated over the scoped period: mornings present, total detections, and median
+      onset/offset/span/peak/occupancy (minutes from civil dawn).</p>
     <div class="tableScroll"><table id="tbl"></table></div>
   </section>
 
@@ -260,153 +276,171 @@ TEMPLATE = r"""<!doctype html>
 <script type="application/json" id="data">/*__DATA__*/</script>
 <script>
 const DATA = JSON.parse(document.getElementById("data").textContent);
-const {meta, summary, ecdf, occ} = DATA;
+const {meta, summary, counts, day_keys} = DATA;
 const root = document.documentElement;
 const css = v => getComputedStyle(root).getPropertyValue(v).trim();
-const fmt = (x, d=0) => x==null ? "—" : Number(x).toFixed(d);
+const fmt = (x, d=0) => (x==null || Number.isNaN(x)) ? "—" : Number(x).toFixed(d);
 const seriesColors = () => ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"].map(css);
 
-// stable colour per ECDF species (identity, not rank)
-const colorFor = {};
-function refreshColors(){ const c=seriesColors(); meta.ecdf_species.forEach((s,i)=> colorFor[s]=c[i%8]); }
+const GRID = meta.grid, NB = GRID.length, HALF = meta.bin/2;
+const DAYIDX = {}; meta.days.forEach((d,i)=> DAYIDX[d]=i);
+const SPIDX = {}; meta.species.forEach((s,i)=> SPIDX[s]=i);
 
+// per (dayIdx|spIdx) -> dense bin-count array. The single building block for every chart.
+const BDS = {};
+counts.forEach(([di,si,bi,c])=>{ const k=di+"|"+si; (BDS[k] || (BDS[k]=new Float64Array(NB)))[bi]=c; });
+
+const median = a => { const s=a.filter(v=>v!=null).sort((x,y)=>x-y), n=s.length;
+  return n ? (n%2 ? s[(n-1)/2] : (s[n/2-1]+s[n/2])/2) : null; };
+
+const colorFor = {};
+function refreshColors(){ const c=seriesColors();
+  meta.top_species.forEach((s,i)=> colorFor[s]=c[i%8]); }
 function plotStyle(){ return {background:"transparent", color:css("--ink"), fontSize:"12.5px"}; }
 function W(el){ return Math.max(300, el.clientWidth || 900); }
 
-function renderSubline(){
-  const m=meta; const loc = (m.lat!=null&&m.lon!=null) ? `${m.lat.toFixed(2)}, ${m.lon.toFixed(2)}` : "";
-  document.getElementById("subline").innerHTML =
-    `${m.mornings.length} morning${m.mornings.length>1?"s":""} &middot; ${loc} &middot; ${m.tz||""}`;
-}
+/* ---- global time scope ---- */
+const aggSel = document.getElementById("aggSel");
+const slider = document.getElementById("periodSlider");
+let periods = [];
+function periodsFor(level){ const out=[], seen=new Set();
+  meta.days.forEach(d=>{ const k=day_keys[d][level]; if(!seen.has(k)){ seen.add(k); out.push(k); } });
+  return out; }
+function scopedDays(){ const level=aggSel.value, pkey=periods[Math.min(+slider.value, periods.length-1)] ?? periods[0];
+  return meta.days.filter(d=>day_keys[d][level]===pkey); }
+function rebuildPeriods(){ periods = periodsFor(aggSel.value);
+  slider.min=0; slider.max=Math.max(0, periods.length-1); slider.value=periods.length-1;
+  slider.disabled = periods.length<=1; renderAll(); }
 
-function renderTiles(){
-  const m=meta, e=m.earliest;
-  const tiles=[
-    ["Mornings", m.mornings.join(" → ")],
+function renderSubline(){ const m=meta, loc=(m.lat!=null&&m.lon!=null)?`${m.lat.toFixed(2)}, ${m.lon.toFixed(2)}`:"";
+  document.getElementById("subline").innerHTML =
+    `${m.days.length} morning${m.days.length>1?"s":""} &middot; ${loc} &middot; ${m.tz||""}`; }
+
+function renderTiles(){ const m=meta, e=m.earliest;
+  const tiles=[["Mornings", `${m.days[0]||"—"}${m.days.length>1?" → "+m.days[m.days.length-1]:""}`],
     ["Species", m.n_species],
     ["Detections", m.n_detections.toLocaleString()+` <small>&ge;${m.min_confidence} conf</small>`],
-    ["Earliest onset", e ? `${fmt(e.onset,0)}<small> min &middot; ${e.name}</small>` : "—"],
-  ];
+    ["Earliest onset", e ? `${fmt(e.onset,0)}<small> min &middot; ${e.name}</small>` : "—"]];
   document.getElementById("tiles").innerHTML = tiles.map(([k,v])=>
-    `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
-}
+    `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join(""); }
 
-function renderTimeline(){
-  const date = document.getElementById("morningSel").value;
-  const rows = summary.filter(d=>d.date===date && d.onset!=null).sort((a,b)=>a.onset-b.onset);
-  const el = document.getElementById("chart-timeline"); el.innerHTML="";
-  if(!rows.length){ el.innerHTML='<p class="empty">No species cleared the onset threshold this morning.</p>'; return; }
-  const names = rows.map(d=>d.name);
-  el.append(Plot.plot({
-    width:W(el), height: names.length*26+80, marginLeft:172, marginRight:26,
-    style:plotStyle(),
-    x:{label:"minutes from civil dawn →", grid:true, domain:meta.window},
-    y:{domain:names, label:null},
-    color:{type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")],
-           legend:true, label:"occupancy (share of active bins)"},
+function updateScopeLabel(S){ const pkey=periods[Math.min(+slider.value, periods.length-1)] ?? periods[0];
+  document.getElementById("periodLabel").textContent = `${pkey||"—"} · ${S.length} morning${S.length!==1?"s":""}`; }
+
+/* ---- charts (all take the scoped set of mornings S) ---- */
+function aggBySpecies(S){ const set=new Set(S), g={};
+  summary.forEach(r=>{ if(set.has(r.date)){ (g[r.name] || (g[r.name]=[])).push(r); } });
+  return g; }
+
+function renderTimeline(S){
+  const el=document.getElementById("chart-timeline"); el.innerHTML="";
+  const g=aggBySpecies(S);
+  const rows=Object.keys(g).map(name=>{ const rs=g[name].filter(r=>r.onset!=null);
+    if(!rs.length) return null;
+    return {name, onset:median(rs.map(r=>r.onset)), offset:median(rs.map(r=>r.offset)),
+      peak:median(rs.map(r=>r.peak)), occ:median(rs.map(r=>r.occ)),
+      n:rs.reduce((s,r)=>s+r.n,0), mornings:rs.length};
+  }).filter(Boolean).sort((a,b)=>a.onset-b.onset);
+  if(!rows.length){ el.innerHTML='<p class="empty">No species cleared the onset threshold in this period.</p>'; return; }
+  const names=rows.map(d=>d.name);
+  el.append(Plot.plot({ width:W(el), height:names.length*26+80, marginLeft:172, marginRight:26, style:plotStyle(),
+    x:{label:"minutes from civil dawn →", grid:true, domain:meta.window}, y:{domain:names, label:null},
+    color:{type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")], legend:true, label:"median occupancy"},
     marks:[
       Plot.ruleX([0], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
       Plot.barX(rows, {x1:"onset", x2:"offset", y:"name", fill:"occ", rx:3, insetTop:5, insetBottom:5}),
       Plot.tickX(rows, {x:"peak", y:"name", stroke:css("--ink"), strokeWidth:2, strokeOpacity:.85}),
       Plot.dot(rows, {x:"onset", y:"name", r:3.4, fill:css("--ink"), stroke:css("--surface"), strokeWidth:1}),
-      Plot.text(rows, {x:"offset", y:"name", text:d=>d.n, dx:8, textAnchor:"start",
-                       fill:css("--muted"), fontSize:10}),
+      Plot.text(rows, {x:"offset", y:"name", text:d=>d.n, dx:8, textAnchor:"start", fill:css("--muted"), fontSize:10}),
       Plot.tip(rows, Plot.pointerY({x:"onset", y:"name",
-        title:d=>`${d.name}\nonset ${fmt(d.onset,0)}  offset ${fmt(d.offset,0)} min\nspan ${fmt(d.span,0)} min · occ ${fmt(d.occ,2)}\n${d.n} detections`}))
-    ]
-  }));
+        title:d=>`${d.name}\nonset ${fmt(d.onset,0)}  offset ${fmt(d.offset,0)} min\nspan ${fmt(d.offset-d.onset,0)} · occ ${fmt(d.occ,2)}\n${d.n} detections over ${d.mornings} morning(s)`}))
+    ]}));
 }
 
-function renderEcdf(){
-  const sel = [...document.querySelectorAll(".ecdf-sp:checked")].map(c=>c.value);
-  const el = document.getElementById("chart-ecdf"); el.innerHTML="";
-  const rows = ecdf.filter(d=>sel.includes(d.name));
-  if(!rows.length){ el.innerHTML='<p class="empty">Pick one or more species above.</p>'; return; }
-  el.append(Plot.plot({
-    width:W(el), height:410, marginLeft:52, marginRight:20,
-    style:plotStyle(),
+function renderEcdf(S){
+  const el=document.getElementById("chart-ecdf"); el.innerHTML="";
+  const sel=[...document.querySelectorAll(".ecdf-sp:checked")].map(c=>c.value);
+  const dIdx=S.map(d=>DAYIDX[d]);
+  const lines=[];
+  sel.forEach(name=>{ const si=SPIDX[name]; if(si==null) return;
+    const acc=new Float64Array(NB); let ncur=0;
+    for(const di of dIdx){ const a=BDS[di+"|"+si]; if(!a) continue;
+      let tot=0; for(let b=0;b<NB;b++) tot+=a[b];
+      if(tot<5) continue;                                   // library floor: >=5 detections/morning
+      let cum=0; for(let b=0;b<NB;b++){ cum+=a[b]; acc[b]+=cum/tot; } ncur++; }
+    if(ncur) for(let b=0;b<NB;b++) lines.push({name, t:GRID[b], F:acc[b]/ncur}); });
+  if(!lines.length){ el.innerHTML='<p class="empty">No selected species had enough detections in this period.</p>'; return; }
+  const shown=[...new Set(lines.map(d=>d.name))];
+  el.append(Plot.plot({ width:W(el), height:410, marginLeft:52, marginRight:20, style:plotStyle(),
     x:{label:"minutes from civil dawn →", grid:true, domain:meta.window},
     y:{label:"↑ cumulative share of detections", domain:[0,1], ticks:[0,.25,.5,.75,1], grid:true},
-    color:{domain:sel, range:sel.map(s=>colorFor[s]), legend:true},
+    color:{domain:shown, range:shown.map(s=>colorFor[s]), legend:true},
     marks:[
       Plot.ruleY([0.05,0.5,0.95], {stroke:css("--grid")}),
       Plot.ruleX([0], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
-      Plot.line(rows, {x:"t", y:"F", stroke:"name", strokeWidth:2, curve:"linear", tip:true}),
-    ]
-  }));
+      Plot.line(lines, {x:"t", y:"F", stroke:"name", strokeWidth:2, tip:true}),
+    ]}));
 }
 
-function renderHeat(){
-  const el = document.getElementById("chart-heat"); el.innerHTML="";
-  const names = meta.heat_species;
-  if(!names.length){ el.innerHTML='<p class="empty">Not enough detections yet for the heatmap.</p>'; return; }
-  const half = meta.bin/2;
-  el.append(Plot.plot({
-    width:W(el), height: names.length*20+80, marginLeft:172, marginRight:26,
-    style:plotStyle(),
-    x:{label:"minutes from civil dawn →", domain:meta.window, grid:false},
-    y:{domain:names, label:null},
-    color:{type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")],
-           legend:true, label:"fraction of mornings singing"},
+function renderHeat(S){
+  const el=document.getElementById("chart-heat"); el.innerHTML="";
+  const names=meta.species, dIdx=S.map(d=>DAYIDX[d]);
+  if(!names.length || !dIdx.length){ el.innerHTML='<p class="empty">Not enough data for the heatmap.</p>'; return; }
+  const rows=[];
+  for(let si=0; si<names.length; si++) for(let bi=0; bi<NB; bi++){
+    let pres=0; for(const di of dIdx){ const a=BDS[di+"|"+si]; if(a && a[bi]>0) pres++; }
+    if(pres>0) rows.push({name:names[si], t:GRID[bi], occ:pres/dIdx.length}); }
+  el.append(Plot.plot({ width:W(el), height:names.length*20+80, marginLeft:172, marginRight:26, style:plotStyle(),
+    x:{label:"minutes from civil dawn →", domain:meta.window, grid:false}, y:{domain:names, label:null},
+    color:{type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")], legend:true, label:"fraction of the period's mornings singing"},
     marks:[
-      Plot.rect(occ, {x1:d=>d.t-half, x2:d=>d.t+half, y:"name", fill:"occ", inset:0.5,
+      Plot.rect(rows, {x1:d=>d.t-HALF, x2:d=>d.t+HALF, y:"name", fill:"occ", inset:0.5,
         title:d=>`${d.name}\n${fmt(d.t,0)} min · ${Math.round(d.occ*100)}% of mornings`}),
       Plot.ruleX([0], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"})
-    ]
-  }));
+    ]}));
 }
 
-function renderTable(){
-  const date = document.getElementById("morningSel").value;
-  const rows = summary.filter(d=>d.date===date)
-    .sort((a,b)=> (a.onset==null)-(b.onset==null) || (a.onset-b.onset) || (b.n-a.n));
-  const head = ["Species","n","onset","offset","span","peak","occ"];
-  const body = rows.map(d=>`<tr><td>${d.name}</td><td>${d.n}</td><td>${fmt(d.onset,0)}</td>`+
-    `<td>${fmt(d.offset,0)}</td><td>${fmt(d.span,0)}</td><td>${fmt(d.peak,0)}</td><td>${fmt(d.occ,2)}</td></tr>`).join("");
+function renderTable(S){
+  const g=aggBySpecies(S);
+  const rows=Object.keys(g).map(name=>{ const rs=g[name];
+    return {name, mornings:rs.length, n:rs.reduce((s,r)=>s+r.n,0),
+      onset:median(rs.map(r=>r.onset)), offset:median(rs.map(r=>r.offset)),
+      span:median(rs.map(r=>r.span)), peak:median(rs.map(r=>r.peak)), occ:median(rs.map(r=>r.occ))};
+  }).sort((a,b)=> (a.onset==null)-(b.onset==null) || (a.onset-b.onset) || (b.n-a.n));
+  const head=["Species","mornings","n","onset","offset","span","peak","occ"];
+  const body=rows.map(d=>`<tr><td>${d.name}</td><td>${d.mornings}</td><td>${d.n}</td>`+
+    `<td>${fmt(d.onset,0)}</td><td>${fmt(d.offset,0)}</td><td>${fmt(d.span,0)}</td>`+
+    `<td>${fmt(d.peak,0)}</td><td>${fmt(d.occ,2)}</td></tr>`).join("");
   document.getElementById("tbl").innerHTML =
     `<thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
 }
 
-function renderFoot(){
-  document.getElementById("foot").innerHTML =
-    `Onset/offset are the 5th/95th percentiles of detection times within the [dawn&minus;2h, dawn+4h] window; `+
-    `mornings below the per-species detection floor get no onset. BirdNET does not separate song from call, `+
-    `so "span" is vocal-activity span, not song-bout length. Charts by `+
-    `<a href="https://observablehq.com/plot/" target="_blank" rel="noopener">Observable&nbsp;Plot</a>. `+
-    `Regenerate with <code>tools/build_site.py</code> as new mornings arrive.`;
+function renderFoot(){ document.getElementById("foot").innerHTML =
+  `Onset/offset are the 5th/95th percentiles of detection times within the [dawn&minus;2h, dawn+4h] window; `+
+  `mornings below the per-species detection floor get no onset. BirdNET does not separate song from call, so `+
+  `"span" is vocal-activity span, not song-bout length. Charts by `+
+  `<a href="https://observablehq.com/plot/" target="_blank" rel="noopener">Observable&nbsp;Plot</a> (library, vendored). `+
+  `Regenerate with <code>tools/build_site.py</code> as new mornings arrive.`; }
+
+function buildChips(){
+  const chips=document.getElementById("ecdfChips");
+  const order=meta.top_species.filter(s=>meta.species.includes(s));
+  const on=new Set(order.slice(0,5));
+  chips.innerHTML=order.map(s=>`<label class="chip${on.has(s)?" on":""}"><input class="ecdf-sp" type="checkbox" value="${s}"${on.has(s)?" checked":""}>${s}</label>`).join("");
+  chips.addEventListener("change", e=>{ e.target.closest(".chip").classList.toggle("on", e.target.checked); renderEcdf(scopedDays()); });
 }
 
-function buildControls(){
-  const sel = document.getElementById("morningSel");
-  sel.innerHTML = meta.mornings.map(d=>`<option value="${d}">${d}</option>`).join("");
-  sel.onchange = ()=>{ renderTimeline(); renderTable(); };
+function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S);
+  renderTimeline(S); renderEcdf(S); renderHeat(S); renderTable(S); }
 
-  const chips = document.getElementById("ecdfChips");
-  const defaults = new Set(meta.top_species.filter(s=>meta.ecdf_species.includes(s)).slice(0,5));
-  const order = meta.top_species.filter(s=>meta.ecdf_species.includes(s));
-  chips.innerHTML = order.map(s=>{
-    const on = defaults.has(s);
-    return `<label class="chip${on?" on":""}"><input class="ecdf-sp" type="checkbox" value="${s}"${on?" checked":""}>${s}</label>`;
-  }).join("");
-  chips.addEventListener("change", e=>{
-    e.target.closest(".chip").classList.toggle("on", e.target.checked);
-    renderEcdf();
-  });
-}
-
-function renderAll(){ refreshColors(); renderTimeline(); renderEcdf(); renderHeat(); renderTable(); }
-
-document.getElementById("theme").onclick = ()=>{
-  const cur = root.getAttribute("data-theme") ||
-    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark":"light");
-  root.setAttribute("data-theme", cur==="dark" ? "light":"dark");
-  renderAll();
-};
+aggSel.onchange = rebuildPeriods;
+slider.oninput = ()=>{ const S=scopedDays(); updateScopeLabel(S); renderTimeline(S); renderEcdf(S); renderHeat(S); renderTable(S); };
+document.getElementById("theme").onclick = ()=>{ const cur=root.getAttribute("data-theme") ||
+    (matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"); root.setAttribute("data-theme", cur==="dark"?"light":"dark"); renderAll(); };
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", ()=>{ if(!root.hasAttribute("data-theme")) renderAll(); });
-
 let rz; addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(renderAll, 180); });
 
-renderSubline(); renderTiles(); renderFoot(); buildControls(); renderAll();
+renderSubline(); renderTiles(); renderFoot(); buildChips(); rebuildPeriods();
 </script>
 </body>
 </html>
