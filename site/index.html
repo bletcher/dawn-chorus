@@ -341,7 +341,12 @@ function wireTimeClicks(el, S){
   if(!hasAudio() || S.length!==1) return;
   const p=el.firstElementChild; if(!p || !p.scale) return;
   const xs=p.scale("x"); if(!xs || !xs.invert) return;
-  const svg=p.matches("svg") ? p : p.querySelector("svg"); if(!svg) return;
+  // A plot with a continuous colour legend is a <figure> holding the legend ramp <svg>
+  // AND the plot <svg>; pick the largest so we don't wire the tiny legend by mistake.
+  const svgs=p.matches("svg") ? [p] : [...p.querySelectorAll("svg")];
+  if(!svgs.length) return;
+  const area=s=>{ const r=s.getBoundingClientRect(); return r.width*r.height; };
+  const svg=svgs.reduce((a,b)=> area(b)>area(a) ? b : a);
   svg.style.cursor="crosshair";
   svg.addEventListener("click", ev=>{
     const rect=svg.getBoundingClientRect();
