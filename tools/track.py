@@ -96,28 +96,52 @@ def cmd_status(args):
         print("up to date — nothing to process.")
 
 
+def cmd_list(args):
+    audio = scan(args.audio)
+    files = load_manifest(args.manifest).get("files", {})
+    print(f"{'recording':42} {'date':11} {'model':12} {'det':>5}  status")
+    print("-" * 82)
+    for name in sorted(audio):
+        m = re.search(r"(\d{8})_\d{6}", name)
+        d = f"{m.group(1)[:4]}-{m.group(1)[4:6]}-{m.group(1)[6:8]}" if m else "?"
+        info = files.get(name)
+        if info:
+            det = info.get("detections")
+            print(f"{name:42} {d:11} {(info.get('model') or 'default'):12} "
+                  f"{('?' if det is None else det):>5}  ✓ {str(info.get('processed_at',''))[:10]}")
+        else:
+            print(f"{name:42} {d:11} {'-':12} {'-':>5}  NEW")
+    for name in sorted(files):
+        if name not in audio:
+            print(f"{name:42} {'':11} {'':12} {'':>5}  MISSING (file gone)")
+
+
 def cmd_process(args):
     audio = scan(args.audio)
     man = load_manifest(args.manifest)
     new, changed, gone = diff(audio, man)
-    todo = new + changed
+    todo = list(audio) if args.reprocess else (new + changed)
     results = args.results or str(Path(args.audio) / "results")
+    model = Path(args.classifier).stem if args.classifier else "default"
 
     if not todo:
         print("nothing new to process.")
     else:
         week = args.week if args.week is not None else infer_week(todo)
         threads = args.threads or max(2, os.cpu_count() or 4)
-        print(f"[analyze] {len(todo)} new/changed recording(s), week {week}, capture >= {args.capture_conf}")
+        print(f"[analyze] {len(todo)} recording(s), model {model}, week {week}, capture >= {args.capture_conf}")
         cmd = [sys.executable, "-m", "birdnet_analyzer.analyze", args.audio, "--output", results,
                "--lat", str(args.lat), "--lon", str(args.lon), "--week", str(week),
-               "--min_conf", str(args.capture_conf), "--rtype", "csv",
-               "--threads", str(threads), "--skip_existing_results"]
+               "--min_conf", str(args.capture_conf), "--rtype", "csv", "--threads", str(threads)]
+        if args.classifier:
+            cmd += ["-c", args.classifier]
+        if not args.reprocess:
+            cmd.append("--skip_existing_results")
         subprocess.run(cmd, check=True)
         stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         for name in todo:
             csv = result_csv(results, name)
-            man.setdefault("files", {})[name] = {**audio[name], "processed_at": stamp,
+            man.setdefault("files", {})[name] = {**audio[name], "processed_at": stamp, "model": model,
                                                  "detections": count_detections(csv) if csv else None}
         man["updated"] = stamp
         Path(args.manifest).write_text(json.dumps(man, indent=2), encoding="utf-8")
@@ -142,7 +166,11 @@ def main(argv=None):
     st.add_argument("--audio", required=True)
     st.add_argument("--manifest", default=None)
 
-    pr = sub.add_parser("process", help="analyze new recordings and update the manifest")
+    ls = sub.add_parser("list", help="per-recording table: processed?, detections, model")
+    ls.add_argument("--audio", required=True)
+    ls.add_argument("--manifest", default=None)
+
+    pr = sub.add_parser("process", help="analyze new (or all) recordings and update the manifest")
     pr.add_argument("--audio", required=True)
     pr.add_argument("--lat", type=float, required=True)
     pr.add_argument("--lon", type=float, required=True)
@@ -156,11 +184,13 @@ def main(argv=None):
     pr.add_argument("--manifest", default=None)
     pr.add_argument("--rebuild-site", action="store_true")
     pr.add_argument("--out-site", default="site/index.html")
+    pr.add_argument("--classifier", default=None, help="path to a custom BirdNET classifier (default model if omitted)")
+    pr.add_argument("--reprocess", action="store_true", help="re-run every recording, not just new/changed")
 
     args = p.parse_args(argv)
     if not getattr(args, "manifest", None):
         args.manifest = str(Path(args.audio) / MANIFEST_NAME)
-    (cmd_status if args.cmd == "status" else cmd_process)(args)
+    {"status": cmd_status, "list": cmd_list, "process": cmd_process}[args.cmd](args)
 
 
 if __name__ == "__main__":
