@@ -244,6 +244,21 @@ TEMPLATE = r"""<!doctype html>
   button.theme{background:var(--surface); color:var(--ink2); border:1px solid var(--line);
     border-radius:8px; padding:7px 11px; font-size:13px; cursor:pointer; white-space:nowrap}
   button.theme:hover{border-color:var(--accent); color:var(--ink)}
+  .hbtns{display:flex; gap:8px}
+  .modal{position:fixed; inset:0; z-index:50; display:flex; align-items:flex-start; justify-content:center;
+    padding:44px 16px; background:rgba(9,13,20,.55); overflow:auto}
+  .modal[hidden]{display:none}
+  .dialog{position:relative; width:100%; max-width:680px; background:var(--surface); color:var(--ink);
+    border:1px solid var(--line); border-radius:14px; padding:26px 30px 30px; box-shadow:0 20px 60px rgba(0,0,0,.4)}
+  .dialog h2{font-size:24px; margin:0 0 12px}
+  .dialog h3{font-size:15px; margin:20px 0 5px; letter-spacing:-.01em}
+  .dialog p, .dialog li{font-size:13.5px; color:var(--ink2); line-height:1.6}
+  .dialog p{margin:0 0 8px} .dialog ul{margin:0 0 8px; padding-left:20px} .dialog li{margin:2px 0}
+  .dialog b, .dialog strong{color:var(--ink); font-weight:600}
+  .dialog .tag{color:var(--dawn)} .dialog .muted{color:var(--muted); font-weight:400}
+  .close{position:absolute; top:10px; right:14px; background:none; border:none; color:var(--muted);
+    font-size:26px; line-height:1; cursor:pointer; padding:2px 6px}
+  .close:hover{color:var(--ink)}
   .tiles{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px}
   .tile{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:13px 15px; box-shadow:var(--shadow)}
   .tile .k{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em}
@@ -310,7 +325,10 @@ TEMPLATE = r"""<!doctype html>
       <h1 class="display">Dawn&nbsp;Chorus</h1>
       <div class="sub" id="subline"></div>
     </div>
-    <button class="theme" id="theme" aria-label="Toggle light or dark theme">◐ Theme</button>
+    <div class="hbtns">
+      <button class="theme" id="guideBtn" aria-haspopup="dialog">Guide</button>
+      <button class="theme" id="theme" aria-label="Toggle light or dark theme">◐ Theme</button>
+    </div>
   </header>
 
   <div class="tiles" id="tiles"></div>
@@ -394,6 +412,53 @@ TEMPLATE = r"""<!doctype html>
   </section>
 
   <footer id="foot"></footer>
+</div>
+
+<div class="modal" id="guide" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-label="User's guide">
+    <button class="close" id="guideClose" aria-label="Close guide">×</button>
+    <h2 class="display">Using this dashboard</h2>
+    <p>Every chart plots a species' morning singing in <b>solar time</b> — minutes from
+      <span class="tag">civil dawn</span> (the dashed line at 0) — so mornings weeks apart line up.</p>
+
+    <h3>Time scope</h3>
+    <p><b>Aggregate</b> (Daily / Weekly / Monthly / Yearly) plus the <b>Period</b> slider pick a set of
+      mornings, and <b>every chart recomputes</b> for them. Slide through time to watch the chorus shift.</p>
+
+    <h3>The charts</h3>
+    <ul>
+      <li><b>Who sings when</b> — each bar runs from a species' <b>onset</b> (when 5% of its detections
+        have occurred) to its <b>offset</b> (95%), median across the period's mornings. Darker = sung
+        more continuously; the tick marks the busiest minute.</li>
+      <li><b>Cumulative call distributions</b> — the curve <em>F(t)</em> is the share of a species'
+        detections by each minute; it crosses 0.05 at onset, 0.5 at median song-time, 0.95 at offset.
+        Toggle species with the chips.</li>
+      <li><b>Occupancy</b> — species &times; 5-minute bin; colour is the fraction of the period's mornings
+        that species was detected in that bin.</li>
+      <li><b>Per-species table</b> — the same measures, aggregated over the period.</li>
+    </ul>
+
+    <h3>Listen &amp; spectrograms <span class="muted">(Daily scope)</span></h3>
+    <ul>
+      <li><b>Click a chart</b> — it snaps to the nearest call and shows a ~5-second <b>spectrogram</b>
+        with each detected species boxed and labelled (name + confidence).</li>
+      <li><b>Click a species</b> in the table to jump to its best example.</li>
+      <li><b>‹ ›</b> step through calls, <b>▶ Play</b> plays the clip, <b>Colour / B&amp;W</b> switches
+        the spectrogram style.</li>
+      <li><b>Recordings:</b> click <b>Recordings folder…</b> to point at your local WAVs (works offline,
+        no server), or set the <b>served base</b> URL if you're serving them.</li>
+    </ul>
+
+    <h3>Good to know</h3>
+    <ul>
+      <li>BirdNET works in 3-second windows and doesn't separate song from call, so "span" is a
+        vocal-activity span, not a song-bout length.</li>
+      <li>Charts count detections at &ge;0.5 confidence; spectrogram labels go lower to show more calls.
+        Many faint calls stay unlabelled — BirdNET didn't clear the bar.</li>
+      <li>Detectability depends on distance, wind, and the mic — keep the recorder fixed across the
+        season for comparisons to hold.</li>
+    </ul>
+  </div>
 </div>
 
 <script type="application/json" id="data">/*__DATA__*/</script>
@@ -765,6 +830,12 @@ document.getElementById("nextDet").onclick = ()=>{ if(cur && cur.list && cur.pos
 })();
 document.getElementById("theme").onclick = ()=>{ const curTheme=root.getAttribute("data-theme") ||
     (matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"); root.setAttribute("data-theme", curTheme==="dark"?"light":"dark"); renderAll(); };
+(function(){ const g=document.getElementById("guide");
+  document.getElementById("guideBtn").onclick=()=>{ g.hidden=false; };
+  document.getElementById("guideClose").onclick=()=>{ g.hidden=true; };
+  g.addEventListener("click", e=>{ if(e.target===g) g.hidden=true; });   // backdrop closes
+  addEventListener("keydown", e=>{ if(e.key==="Escape") g.hidden=true; });
+})();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", ()=>{ if(!root.hasAttribute("data-theme")) renderAll(); });
 let rz; addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(()=>{ renderAll(); renderClip(); }, 180); });
 
