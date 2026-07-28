@@ -22,6 +22,11 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 class RangeHandler(SimpleHTTPRequestHandler):
     """SimpleHTTPRequestHandler + byte-range (206) support for GET/HEAD."""
 
+    def end_headers(self):
+        # A dev server: always revalidate so a rebuilt dashboard shows up on refresh.
+        self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
+
     def send_head(self):
         rng = self.headers.get("Range")
         if not rng:
