@@ -519,49 +519,56 @@ function playClip(){ if(!cur||!cur.clip) return;
   (function tick(){ const el=(ctx.currentTime-t0)/dur; if(el>=1){ ph.style.display="none"; return; } ph.style.left=(el*100)+"%"; playRAF=requestAnimationFrame(tick); })();
   srcNode.onended=()=>{ ph.style.display="none"; }; }
 
-async function loadCurrent(){
-  const {day,name,dets,idx}=cur, t=dets[idx][0], c=dets[idx][1], files=AUDIO[day], dawnSec=DAWN[day];
+const _distinct={};                                          // deduped, chronological calls per day (collapse overlap dupes)
+function distinctDets(day){
+  if(_distinct[day]) return _distinct[day];
+  const arr=(DETS[day]||[]).slice().sort((a,b)=> (a[1]-b[1]) || (a[0]-b[0]));   // by species, then time
+  const out=[]; let ls=-1, lt=-1e9;
+  for(const d of arr){
+    if(d[1]===ls && (d[0]-lt)*60 < 2){ if(d[2]>out[out.length-1][2]) out[out.length-1]=d.slice(); lt=d[0]; continue; }
+    out.push(d.slice()); ls=d[1]; lt=d[0];
+  }
+  out.sort((a,b)=>a[0]-b[0]);
+  return (_distinct[day]=out);
+}
+
+async function loadAt(day, list, pos){                        // load + draw list[pos]; enable/disable the ‹ › steps
+  if(!list.length){ showSpec(false); setAudioInfo("No detections here."); return; }
+  pos=Math.max(0, Math.min(pos, list.length-1));
+  const e=list[pos], t=e[0], name=LABELSP[e[1]], c=e[2], files=AUDIO[day], dawnSec=DAWN[day];
   if(!files || dawnSec==null){ setAudioInfo(`No recording for ${day}.`); showSpec(false); return; }
-  const abs=dawnSec + t*60, f=files.find(f=>f.d!=null && abs>=f.s && abs<f.s+f.d) || files.find(f=>abs>=f.s) || files[0];
-  const startOff=Math.max(0, (abs - f.s) - PRE);
-  cur.file=f; cur.startOff=startOff;
+  const abs=dawnSec + t*60, f=files.find(x=>x.d!=null && abs>=x.s && abs<x.s+x.d) || files.find(x=>abs>=x.s) || files[0];
+  const startOff=Math.max(0, (abs - f.s) - CLIP_SEC/2);
+  cur={day, list, pos, file:f, startOff};
   setAudioInfo(`loading… <span class="mono">${f.name}</span>`);
   try{ cur.clip=await loadPcm(f.name, startOff, CLIP_SEC);
     showSpec(true); renderClip();
-    document.getElementById("detIdx").textContent=`${idx+1}/${dets.length}`;
-    document.getElementById("prevDet").disabled=idx<=0; document.getElementById("nextDet").disabled=idx>=dets.length-1;
-    setAudioInfo(`<strong>${name}</strong> · ${secToClock(abs)} local · conf ${c.toFixed(2)} · <span class="mono">${f.name}</span> @ ${(abs-f.s).toFixed(0)}s`);
-  }catch(e){ showSpec(false); setAudioInfo(audioErr(e)); } }
-
-async function openAudioFor(name){
-  const S=scopedDays(); if(!hasAudio() || S.length!==1) return;
-  const day=S[0], dets=(CLIPS[day]||{})[name];
-  document.getElementById("audioCard").scrollIntoView({behavior:"smooth", block:"nearest"});
-  if(!dets || !dets.length){ showSpec(false); setAudioInfo(`No detections to play for ${name} on ${day}.`); return; }
-  cur={day, name, dets, idx:0}; await loadCurrent(); }
+    document.getElementById("detIdx").textContent=`${pos+1}/${list.length}`;
+    document.getElementById("prevDet").disabled=pos<=0;
+    document.getElementById("nextDet").disabled=pos>=list.length-1;
+    setAudioInfo(`<strong>${name}</strong> ${c.toFixed(2)} · ${secToClock(abs)} local · ${Math.round(t)} min from dawn · <span class="mono">${f.name}</span>`);
+  }catch(err){ showSpec(false); setAudioInfo(audioErr(err)); } }
 
 function audioErr(e){ return `Couldn't load audio (${e.message}). Pick your recordings folder below, or run <code>python tools/serve.py</code> and open <code>/site/</code>.`; }
 
-async function openAudioAt(day, xMin){                        // click a chart -> clip at the nearest detection
+async function openAudioFor(name){                            // table species -> that species' calls, best first
+  const S=scopedDays(); if(!hasAudio() || S.length!==1) return;
+  const day=S[0], si=LABELSP.indexOf(name);
+  document.getElementById("audioCard").scrollIntoView({behavior:"smooth", block:"nearest"});
+  const list=distinctDets(day).filter(d=>d[1]===si);
+  if(!list.length){ showSpec(false); setAudioInfo(`No detections for ${name} on ${day}.`); return; }
+  let pos=0, bc=-1; list.forEach((d,i)=>{ if(d[2]>bc){ bc=d[2]; pos=i; } });   // start on the best example
+  await loadAt(day, list, pos); }
+
+async function openAudioAt(day, xMin){                        // click a chart -> nearest call; ‹ › scrub all calls
   document.getElementById("audioCard").scrollIntoView({behavior:"smooth", block:"nearest"});
   if(!AUDIO[day] || DAWN[day]==null) return;
-  // Detections are sparse, so snap to the nearest one within SNAP_MIN so a click lands on a real call.
-  let t=xMin, best=Infinity;
-  (DETS[day]||[]).forEach(d=>{ const diff=Math.abs(d[0]-xMin); if(diff<best){ best=diff; t=d[0]; } });
-  const snapped = best<=SNAP_MIN; if(!snapped) t=xMin;
-  const abs=DAWN[day] + t*60, files=AUDIO[day], f=files.find(x=>x.d!=null && abs>=x.s && abs<x.s+x.d);
-  if(!f){ showSpec(false); setAudioInfo(`No recording at ${secToClock(DAWN[day]+xMin*60)} (${Math.round(xMin)} min from dawn).`); return; }
-  const startOff=Math.max(0, (abs - f.s) - CLIP_SEC/2);
-  cur={day, at:t, dets:null, idx:0, file:f, startOff:startOff};
-  setAudioInfo(`loading… <span class="mono">${f.name}</span>`);
-  try{ cur.clip=await loadPcm(f.name, startOff, CLIP_SEC);
-    showSpec(true); renderClip();
-    document.getElementById("detIdx").textContent=""; document.getElementById("prevDet").disabled=true; document.getElementById("nextDet").disabled=true;
-    const note = snapped && Math.abs(t-xMin)>=0.1 ? ` (nearest call to ${Math.round(xMin)} min)` : (snapped ? "" : " — no detection near this spot");
-    setAudioInfo(`${secToClock(abs)} local · ${Math.round(t)} min from dawn${note} · <span class="mono">${f.name}</span> @ ${(abs-f.s).toFixed(0)}s`);
-  }catch(e){ showSpec(false); setAudioInfo(audioErr(e)); } }
+  const list=distinctDets(day);
+  if(!list.length){ showSpec(false); setAudioInfo(`No detections on ${day}.`); return; }
+  let pos=0, best=Infinity; list.forEach((d,i)=>{ const diff=Math.abs(d[0]-xMin); if(diff<best){ best=diff; pos=i; } });
+  await loadAt(day, list, pos); }
 
-function reloadCur(){ if(!cur) return; if(cur.dets) loadCurrent(); else if(cur.at!=null) openAudioAt(cur.day, cur.at); }
+function reloadCur(){ if(cur && cur.list) loadAt(cur.day, cur.list, cur.pos); }
 
 function wireTimeClicks(el, S){
   if(!hasAudio() || S.length!==1) return;
@@ -585,7 +592,7 @@ function updateAudioCard(S){
   if(!hasAudio()){ card.hidden=true; return; }
   card.hidden=false;
   document.getElementById("audioLead").innerHTML = S.length===1
-    ? `Click anywhere on a chart — it snaps to the nearest call — to see its <strong>spectrogram</strong> and species on <strong>${S[0]}</strong> (or pick a species in the table), then play it.`
+    ? `Click a chart (snaps to the nearest call) or a table species to see its <strong>spectrogram</strong> on <strong>${S[0]}</strong>; use <strong>‹ ›</strong> to step through calls, ▶ to play.`
     : `Set the time scope to a single day (<strong>Daily</strong>) to view spectrograms.`;
 }
 
@@ -741,8 +748,8 @@ function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S)
 aggSel.onchange = rebuildPeriods;
 slider.oninput = renderAll;
 document.getElementById("playBtn").onclick = playClip;
-document.getElementById("prevDet").onclick = ()=>{ if(cur && cur.dets && cur.idx>0){ cur.idx--; loadCurrent(); } };
-document.getElementById("nextDet").onclick = ()=>{ if(cur && cur.dets && cur.idx<cur.dets.length-1){ cur.idx++; loadCurrent(); } };
+document.getElementById("prevDet").onclick = ()=>{ if(cur && cur.list && cur.pos>0) loadAt(cur.day, cur.list, cur.pos-1); };
+document.getElementById("nextDet").onclick = ()=>{ if(cur && cur.list && cur.pos<cur.list.length-1) loadAt(cur.day, cur.list, cur.pos+1); };
 (function initAudioSettings(){
   const ub=document.getElementById("urlBase"), sm=document.getElementById("specMode"),
         dp=document.getElementById("dirPick"), db=document.getElementById("dirBtn"), st=document.getElementById("dirStatus");
