@@ -151,7 +151,8 @@ def cmd_process(args):
     if args.rebuild_site:
         print(f"[site] rebuilding {args.out_site} (counting >= {args.min_confidence})")
         data = build_site.build_data(analyzer_path=results, lat=args.lat, lon=args.lon, tz=args.tz,
-                                     min_conf=args.min_confidence, file_tz=args.file_tz, audio_dir=args.audio)
+                                     min_conf=args.min_confidence, file_tz=args.file_tz, audio_dir=args.audio,
+                                     label_min_conf=args.label_min_conf)
         out = Path(args.out_site)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(build_site.render_html(data), encoding="utf-8")
@@ -180,6 +181,8 @@ def main(argv=None):
     pr.add_argument("--week", type=int, default=None)
     pr.add_argument("--capture-conf", type=float, default=0.25)
     pr.add_argument("--min-confidence", type=float, default=0.50)
+    pr.add_argument("--label-min-confidence", dest="label_min_conf", type=float, default=0.25,
+                    help="confidence floor for spectrogram labels (charts use --min-confidence)")
     pr.add_argument("--overlap", type=float, default=0.0,
                     help="0-2.9s window overlap; higher = near-continuous coverage, more detections (slower)")
     pr.add_argument("--sensitivity", type=float, default=1.0, help="0.5-1.5; higher = more eager detections")
