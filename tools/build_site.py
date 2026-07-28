@@ -65,7 +65,8 @@ def scan_audio(audio_dir, lat, lon, tz):
 
 
 def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
-               min_conf=0.5, file_tz=None, audio_dir=None, audio_base="../data", label_min_conf=0.25):
+               min_conf=0.5, file_tz=None, audio_dir=None, audio_base="../data", label_min_conf=0.25,
+               label_analyzer_path=None):
     out = dc.run(db_path=db_path, analyzer_path=analyzer_path, latitude=lat, longitude=lon,
                  tz=tz, min_confidence=min_conf, file_tz=file_tz)
     det, ms = out["detections"], out["morning_summary"]
@@ -121,8 +122,9 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
     # Every in-window detection per morning, for labelling the spectrogram:
     # [solar-minute, species-index, confidence]. Reloaded down to `label_min_conf` so the
     # spectrogram shows more calls than the (higher) analysis threshold used for the charts.
-    if analyzer_path:
-        det_lab = dc.load_birdnet_analyzer(analyzer_path, min_confidence=label_min_conf,
+    label_src = label_analyzer_path or analyzer_path      # labels can come from a denser (higher-overlap) run
+    if label_src:
+        det_lab = dc.load_birdnet_analyzer(label_src, min_confidence=label_min_conf,
                                            latitude=lat, longitude=lon, tz=tz, file_tz=file_tz)
     else:
         det_lab = dc.load_detections(db_path, min_confidence=label_min_conf, latitude=lat, longitude=lon)
@@ -169,6 +171,8 @@ def main(argv=None):
     src = p.add_mutually_exclusive_group(required=True)
     src.add_argument("--db")
     src.add_argument("--from-analyzer", dest="from_analyzer")
+    p.add_argument("--label-from-analyzer", dest="label_from_analyzer", default=None,
+                   help="separate (denser, e.g. higher-overlap) results folder for spectrogram labels only")
     p.add_argument("--lat", type=float, required=True)
     p.add_argument("--lon", type=float, required=True)
     p.add_argument("--tz", required=True)
@@ -185,7 +189,8 @@ def main(argv=None):
 
     data = build_data(analyzer_path=args.from_analyzer, db_path=args.db, lat=args.lat,
                       lon=args.lon, tz=args.tz, min_conf=args.min_confidence, file_tz=args.file_tz,
-                      audio_dir=args.audio, audio_base=args.audio_base, label_min_conf=args.label_min_conf)
+                      audio_dir=args.audio, audio_base=args.audio_base, label_min_conf=args.label_min_conf,
+                      label_analyzer_path=args.label_from_analyzer)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(data), encoding="utf-8")

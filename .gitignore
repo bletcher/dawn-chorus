@@ -14,7 +14,7 @@ env/
 *.db
 *.sqlite
 *_weather.csv
-results/
+results*/
 
 # Raw audio recordings — huge, belong in cold storage, never in git
 *.wav
