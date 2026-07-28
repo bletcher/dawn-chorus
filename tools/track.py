@@ -132,7 +132,8 @@ def cmd_process(args):
         print(f"[analyze] {len(todo)} recording(s), model {model}, week {week}, capture >= {args.capture_conf}")
         cmd = [sys.executable, "-m", "birdnet_analyzer.analyze", args.audio, "--output", results,
                "--lat", str(args.lat), "--lon", str(args.lon), "--week", str(week),
-               "--min_conf", str(args.capture_conf), "--rtype", "csv", "--threads", str(threads)]
+               "--min_conf", str(args.capture_conf), "--overlap", str(args.overlap),
+               "--sensitivity", str(args.sensitivity), "--rtype", "csv", "--threads", str(threads)]
         if args.classifier:
             cmd += ["-c", args.classifier]
         if not args.reprocess:
@@ -179,6 +180,9 @@ def main(argv=None):
     pr.add_argument("--week", type=int, default=None)
     pr.add_argument("--capture-conf", type=float, default=0.25)
     pr.add_argument("--min-confidence", type=float, default=0.50)
+    pr.add_argument("--overlap", type=float, default=0.0,
+                    help="0-2.9s window overlap; higher = near-continuous coverage, more detections (slower)")
+    pr.add_argument("--sensitivity", type=float, default=1.0, help="0.5-1.5; higher = more eager detections")
     pr.add_argument("--threads", type=int, default=0)
     pr.add_argument("--results", default=None)
     pr.add_argument("--manifest", default=None)
