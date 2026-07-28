@@ -118,6 +118,16 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
             clips.setdefault(str(d), {})[sp] = [[round(float(r[acol]), 2), round(float(r["confidence"]), 2)]
                                                 for _, r in top.iterrows()]
 
+    # Every in-window detection per morning, for labelling the spectrogram:
+    # [solar-minute, species-index, confidence]. species-index -> label_species.
+    label_species = sorted(win["common_name"].unique().tolist())
+    lsp = {s: i for i, s in enumerate(label_species)}
+    dets_by_day = {}
+    if "confidence" in win.columns:
+        for d, g in win.groupby("date"):
+            dets_by_day[str(d)] = [[round(float(a), 2), lsp[s], round(float(c), 2)]
+                                   for s, a, c in zip(g["common_name"], g[acol], g["confidence"])]
+
     valid = ms.dropna(subset=["onset_min"])
     earliest = None
     if not valid.empty:
@@ -135,11 +145,12 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
         "species": species,                                   # heatmap/ECDF order (earliest first)
         "top_species": [s for s in totals.index if s in heat_set],   # by detections (ECDF default + colour)
         "earliest": earliest,
+        "label_species": label_species,
         "audio_base": audio_base,
     }
     audio, dawn = scan_audio(audio_dir, lat, lon, tz) if audio_dir else ({}, {})
     return {"meta": meta, "summary": summary, "counts": counts, "day_keys": day_keys,
-            "audio": audio, "dawn": dawn, "clips": clips}
+            "audio": audio, "dawn": dawn, "clips": clips, "dets": dets_by_day}
 
 
 def render_html(data: dict) -> str:
@@ -389,6 +400,7 @@ const BDS = {};
 counts.forEach(([di,si,bi,c])=>{ const k=di+"|"+si; (BDS[k] || (BDS[k]=new Float64Array(NB)))[bi]=c; });
 
 const AUDIO = DATA.audio || null, DAWN = DATA.dawn || {}, CLIPS = DATA.clips || {};
+const LABELSP = meta.label_species || [], DETS = DATA.dets || {};
 const CLIP_SEC = 5.5, PRE = 0.5;                          // ~5s clip, 0.5s lead-in before the call
 let ABASE = localStorage.getItem("dc_audio_base") || meta.audio_base || "../data";
 let specMode = localStorage.getItem("dc_spec_mode") || "color";
@@ -465,6 +477,24 @@ function drawSpec(samples, sr){
   const ax=document.getElementById("freqax");
   if(ax){ ax.children[0].textContent=(maxF/1000).toFixed(0)+" kHz"; ax.children[1].textContent=(maxF/2000).toFixed(0); ax.children[2].textContent="0"; } }
 
+function renderClip(){ if(cur && cur.clip){ drawSpec(cur.clip.samples, cur.clip.sampleRate); drawLabels(); } }
+function drawLabels(){                                     // BirdNET 3s detections boxed + named over the clip
+  if(!cur || !cur.file || !DETS[cur.day]) return;
+  const canvas=document.getElementById("spec"), ctx=canvas.getContext("2d"), W=canvas.width, H=canvas.height;
+  const f=cur.file, startOff=cur.startOff, dawnSec=DAWN[cur.day], SEG=3, dark=specMode!=="bw";
+  const best={};                                          // one box per species (highest conf) in the window
+  DETS[cur.day].forEach(d=>{ const ft=(dawnSec + d[0]*60) - f.s;
+    if(ft+SEG<startOff || ft>startOff+CLIP_SEC) return;
+    if(!best[d[1]] || d[2]>best[d[1]].c) best[d[1]]={ft, si:d[1], c:d[2]}; });
+  const rows=Object.values(best).sort((a,b)=>a.ft-b.ft);
+  ctx.font="600 11px system-ui,sans-serif"; ctx.textBaseline="top";
+  rows.forEach((r,i)=>{ const x1=Math.max(1,(r.ft-startOff)/CLIP_SEC*W), x2=Math.min(W-1,(r.ft+SEG-startOff)/CLIP_SEC*W);
+    ctx.strokeStyle=dark?"rgba(255,255,255,.85)":"rgba(0,0,0,.7)"; ctx.lineWidth=1.5; ctx.strokeRect(x1,2,x2-x1,H-4);
+    const lab=`${LABELSP[r.si]} ${r.c.toFixed(2)}`, tw=ctx.measureText(lab).width, ly=3+(i%3)*15;
+    ctx.fillStyle=dark?"rgba(0,0,0,.6)":"rgba(255,255,255,.82)"; ctx.fillRect(x1, ly, Math.min(tw+8, W-x1), 14);
+    ctx.fillStyle=dark?"#fff":"#111"; ctx.fillText(lab, x1+4, ly+1); });
+}
+
 function playClip(){ if(!cur||!cur.clip) return;
   const ctx=actx||(actx=new (window.AudioContext||window.webkitAudioContext)());
   if(srcNode){ try{srcNode.stop()}catch(e){} }
@@ -480,9 +510,10 @@ async function loadCurrent(){
   if(!files || dawnSec==null){ setAudioInfo(`No recording for ${day}.`); showSpec(false); return; }
   const abs=dawnSec + t*60, f=files.find(f=>f.d!=null && abs>=f.s && abs<f.s+f.d) || files.find(f=>abs>=f.s) || files[0];
   const startOff=Math.max(0, (abs - f.s) - PRE);
+  cur.file=f; cur.startOff=startOff;
   setAudioInfo(`loading… <span class="mono">${f.name}</span>`);
   try{ cur.clip=await loadPcm(f.name, startOff, CLIP_SEC);
-    showSpec(true); drawSpec(cur.clip.samples, cur.clip.sampleRate);
+    showSpec(true); renderClip();
     document.getElementById("detIdx").textContent=`${idx+1}/${dets.length}`;
     document.getElementById("prevDet").disabled=idx<=0; document.getElementById("nextDet").disabled=idx>=dets.length-1;
     setAudioInfo(`<strong>${name}</strong> · ${secToClock(abs)} local · conf ${c.toFixed(2)} · <span class="mono">${f.name}</span> @ ${(abs-f.s).toFixed(0)}s`);
@@ -502,11 +533,11 @@ async function openAudioAt(day, xMin){                        // click anywhere 
   if(!AUDIO[day] || DAWN[day]==null) return;
   const abs=DAWN[day] + xMin*60, files=AUDIO[day], f=files.find(x=>x.d!=null && abs>=x.s && abs<x.s+x.d);
   if(!f){ showSpec(false); setAudioInfo(`No recording at ${secToClock(abs)} (${Math.round(xMin)} min from dawn).`); return; }
-  cur={day, at:xMin, dets:null, idx:0};
   const startOff=Math.max(0, (abs - f.s) - CLIP_SEC/2);
+  cur={day, at:xMin, dets:null, idx:0, file:f, startOff:startOff};
   setAudioInfo(`loading… <span class="mono">${f.name}</span>`);
   try{ cur.clip=await loadPcm(f.name, startOff, CLIP_SEC);
-    showSpec(true); drawSpec(cur.clip.samples, cur.clip.sampleRate);
+    showSpec(true); renderClip();
     document.getElementById("detIdx").textContent=""; document.getElementById("prevDet").disabled=true; document.getElementById("nextDet").disabled=true;
     setAudioInfo(`${secToClock(abs)} local · ${Math.round(xMin)} min from dawn · <span class="mono">${f.name}</span> @ ${(abs-f.s).toFixed(0)}s`);
   }catch(e){ showSpec(false); setAudioInfo(audioErr(e)); } }
@@ -704,12 +735,12 @@ document.getElementById("nextDet").onclick = ()=>{ if(cur && cur.dets && cur.idx
     st.textContent = n ? `${n} local recording${n>1?"s":""}` : "no .wav found in folder"; reloadCur(); };
   ub.onchange=()=>{ ABASE=ub.value.trim()||meta.audio_base||"../data"; localStorage.setItem("dc_audio_base",ABASE);
     for(const k in headerCache) delete headerCache[k]; reloadCur(); };
-  sm.onchange=()=>{ specMode=sm.value; localStorage.setItem("dc_spec_mode",specMode); if(cur&&cur.clip) drawSpec(cur.clip.samples,cur.clip.sampleRate); };
+  sm.onchange=()=>{ specMode=sm.value; localStorage.setItem("dc_spec_mode",specMode); renderClip(); };
 })();
 document.getElementById("theme").onclick = ()=>{ const curTheme=root.getAttribute("data-theme") ||
     (matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"); root.setAttribute("data-theme", curTheme==="dark"?"light":"dark"); renderAll(); };
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", ()=>{ if(!root.hasAttribute("data-theme")) renderAll(); });
-let rz; addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(()=>{ renderAll(); if(cur&&cur.clip) drawSpec(cur.clip.samples, cur.clip.sampleRate); }, 180); });
+let rz; addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(()=>{ renderAll(); renderClip(); }, 180); });
 
 renderSubline(); renderTiles(); renderFoot(); buildChips(); rebuildPeriods();
 </script>
