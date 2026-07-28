@@ -65,7 +65,7 @@ def scan_audio(audio_dir, lat, lon, tz):
 
 
 def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
-               min_conf=0.5, file_tz=None, audio_dir=None, audio_base="../data"):
+               min_conf=0.5, file_tz=None, audio_dir=None, audio_base="../data", label_min_conf=0.25):
     out = dc.run(db_path=db_path, analyzer_path=analyzer_path, latitude=lat, longitude=lon,
                  tz=tz, min_confidence=min_conf, file_tz=file_tz)
     det, ms = out["detections"], out["morning_summary"]
@@ -119,14 +119,21 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
                                                 for _, r in top.iterrows()]
 
     # Every in-window detection per morning, for labelling the spectrogram:
-    # [solar-minute, species-index, confidence]. species-index -> label_species.
-    label_species = sorted(win["common_name"].unique().tolist())
+    # [solar-minute, species-index, confidence]. Reloaded down to `label_min_conf` so the
+    # spectrogram shows more calls than the (higher) analysis threshold used for the charts.
+    if analyzer_path:
+        det_lab = dc.load_birdnet_analyzer(analyzer_path, min_confidence=label_min_conf,
+                                           latitude=lat, longitude=lon, tz=tz, file_tz=file_tz)
+    else:
+        det_lab = dc.load_detections(db_path, min_confidence=label_min_conf, latitude=lat, longitude=lon)
+    det_lab = dc.SolarModel(lat, lon, tz).annotate(det_lab)
+    winlab = det_lab[(det_lab[acol] >= lo) & (det_lab[acol] < hi)]
+    label_species = sorted(winlab["common_name"].unique().tolist())
     lsp = {s: i for i, s in enumerate(label_species)}
     dets_by_day = {}
-    if "confidence" in win.columns:
-        for d, g in win.groupby("date"):
-            dets_by_day[str(d)] = [[round(float(a), 2), lsp[s], round(float(c), 2)]
-                                   for s, a, c in zip(g["common_name"], g[acol], g["confidence"])]
+    for d, g in winlab.groupby("date"):
+        dets_by_day[str(d)] = [[round(float(a), 2), lsp[s], round(float(c), 2)]
+                               for s, a, c in zip(g["common_name"], g[acol], g["confidence"])]
 
     valid = ms.dropna(subset=["onset_min"])
     earliest = None
@@ -167,6 +174,8 @@ def main(argv=None):
     p.add_argument("--tz", required=True)
     p.add_argument("--file-tz", dest="file_tz", default=None)
     p.add_argument("--min-confidence", type=float, default=0.5)
+    p.add_argument("--label-min-confidence", dest="label_min_conf", type=float, default=0.25,
+                   help="confidence floor for spectrogram labels (charts use --min-confidence)")
     p.add_argument("--audio", default=None,
                    help="folder of WAV recordings (enables click-to-listen in daily scope)")
     p.add_argument("--audio-url-base", dest="audio_base", default="../data",
@@ -176,7 +185,7 @@ def main(argv=None):
 
     data = build_data(analyzer_path=args.from_analyzer, db_path=args.db, lat=args.lat,
                       lon=args.lon, tz=args.tz, min_conf=args.min_confidence, file_tz=args.file_tz,
-                      audio_dir=args.audio, audio_base=args.audio_base)
+                      audio_dir=args.audio, audio_base=args.audio_base, label_min_conf=args.label_min_conf)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(data), encoding="utf-8")
@@ -401,7 +410,7 @@ counts.forEach(([di,si,bi,c])=>{ const k=di+"|"+si; (BDS[k] || (BDS[k]=new Float
 
 const AUDIO = DATA.audio || null, DAWN = DATA.dawn || {}, CLIPS = DATA.clips || {};
 const LABELSP = meta.label_species || [], DETS = DATA.dets || {};
-const CLIP_SEC = 5.5, PRE = 0.5;                          // ~5s clip, 0.5s lead-in before the call
+const CLIP_SEC = 5.5, PRE = 0.5, SNAP_MIN = 2;            // ~5s clip; snap a click to a detection within 2 min
 let ABASE = localStorage.getItem("dc_audio_base") || meta.audio_base || "../data";
 let specMode = localStorage.getItem("dc_spec_mode") || "color";
 const audioFiles = {};                                    // basename -> File (from a picked local folder)
@@ -528,18 +537,23 @@ async function openAudioFor(name){
 
 function audioErr(e){ return `Couldn't load audio (${e.message}). Pick your recordings folder below, or run <code>python tools/serve.py</code> and open <code>/site/</code>.`; }
 
-async function openAudioAt(day, xMin){                        // click anywhere on a chart -> clip centred on that time
+async function openAudioAt(day, xMin){                        // click a chart -> clip at the nearest detection
   document.getElementById("audioCard").scrollIntoView({behavior:"smooth", block:"nearest"});
   if(!AUDIO[day] || DAWN[day]==null) return;
-  const abs=DAWN[day] + xMin*60, files=AUDIO[day], f=files.find(x=>x.d!=null && abs>=x.s && abs<x.s+x.d);
-  if(!f){ showSpec(false); setAudioInfo(`No recording at ${secToClock(abs)} (${Math.round(xMin)} min from dawn).`); return; }
+  // Detections are sparse, so snap to the nearest one within SNAP_MIN so a click lands on a real call.
+  let t=xMin, best=Infinity;
+  (DETS[day]||[]).forEach(d=>{ const diff=Math.abs(d[0]-xMin); if(diff<best){ best=diff; t=d[0]; } });
+  const snapped = best<=SNAP_MIN; if(!snapped) t=xMin;
+  const abs=DAWN[day] + t*60, files=AUDIO[day], f=files.find(x=>x.d!=null && abs>=x.s && abs<x.s+x.d);
+  if(!f){ showSpec(false); setAudioInfo(`No recording at ${secToClock(DAWN[day]+xMin*60)} (${Math.round(xMin)} min from dawn).`); return; }
   const startOff=Math.max(0, (abs - f.s) - CLIP_SEC/2);
-  cur={day, at:xMin, dets:null, idx:0, file:f, startOff:startOff};
+  cur={day, at:t, dets:null, idx:0, file:f, startOff:startOff};
   setAudioInfo(`loading… <span class="mono">${f.name}</span>`);
   try{ cur.clip=await loadPcm(f.name, startOff, CLIP_SEC);
     showSpec(true); renderClip();
     document.getElementById("detIdx").textContent=""; document.getElementById("prevDet").disabled=true; document.getElementById("nextDet").disabled=true;
-    setAudioInfo(`${secToClock(abs)} local · ${Math.round(xMin)} min from dawn · <span class="mono">${f.name}</span> @ ${(abs-f.s).toFixed(0)}s`);
+    const note = snapped && Math.abs(t-xMin)>=0.1 ? ` (nearest call to ${Math.round(xMin)} min)` : (snapped ? "" : " — no detection near this spot");
+    setAudioInfo(`${secToClock(abs)} local · ${Math.round(t)} min from dawn${note} · <span class="mono">${f.name}</span> @ ${(abs-f.s).toFixed(0)}s`);
   }catch(e){ showSpec(false); setAudioInfo(audioErr(e)); } }
 
 function reloadCur(){ if(!cur) return; if(cur.dets) loadCurrent(); else if(cur.at!=null) openAudioAt(cur.day, cur.at); }
@@ -566,7 +580,7 @@ function updateAudioCard(S){
   if(!hasAudio()){ card.hidden=true; return; }
   card.hidden=false;
   document.getElementById("audioLead").innerHTML = S.length===1
-    ? `Click anywhere on a chart to see the <strong>spectrogram</strong> at that moment on <strong>${S[0]}</strong> (or a species in the table for its best call), then play it.`
+    ? `Click anywhere on a chart — it snaps to the nearest call — to see its <strong>spectrogram</strong> and species on <strong>${S[0]}</strong> (or pick a species in the table), then play it.`
     : `Set the time scope to a single day (<strong>Daily</strong>) to view spectrograms.`;
 }
 
