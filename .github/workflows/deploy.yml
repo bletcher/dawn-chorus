@@ -1,0 +1,47 @@
+name: Deploy dashboard to GitHub Pages
+
+# The dashboard is a self-contained static site (site/index.html + vendored d3/Plot) with
+# its data embedded at build time. build_site.py runs locally (it needs the recordings and
+# result tables, which are gitignored), then site/ is committed. This workflow just publishes
+# site/ — so the live page updates whenever a rebuilt site/ is pushed to main.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch: {}
+
+# Least-privilege token that can publish to Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; let an in-flight deploy finish rather than cancelling it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site/ as the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
