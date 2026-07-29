@@ -1,9 +1,9 @@
-name: Deploy dashboard to GitHub Pages
+name: Deploy dashboard (S3 + CloudFront)
 
-# The dashboard is a self-contained static site (site/index.html + vendored d3/Plot) with
-# its data embedded at build time. build_site.py runs locally (it needs the recordings and
-# result tables, which are gitignored), then site/ is committed. This workflow just publishes
-# site/ — so the live page updates whenever a rebuilt site/ is pushed to main.
+# Same deploy pattern as the events-listing app: sync the static site to S3 and invalidate
+# CloudFront, using the same AWS secrets. dawn-chorus has no server-side scrape/build step --
+# the dashboard is built locally (build_site.py needs the recordings/results, which are
+# gitignored) and committed as site/ -- so this just publishes site/ under /dawn-chorus.
 
 on:
   push:
@@ -13,35 +13,38 @@ on:
       - ".github/workflows/deploy.yml"
   workflow_dispatch: {}
 
-# Least-privilege token that can publish to Pages.
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-# One deploy at a time; let an in-flight deploy finish rather than cancelling it.
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload site/ as the Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          path: site
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Sync site/ to S3 under /dawn-chorus
+        run: |
+          aws s3 sync site/ "s3://${{ secrets.S3_BUCKET }}/dawn-chorus/" \
+            --delete \
+            --cache-control "max-age=3600"
+
+      - name: Invalidate CloudFront cache
+        env:
+          CF_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          if [ -n "$CF_DISTRIBUTION_ID" ]; then
+            aws cloudfront create-invalidation \
+              --distribution-id "$CF_DISTRIBUTION_ID" \
+              --paths "/dawn-chorus/*"
+            echo "CloudFront cache invalidated for /dawn-chorus"
+          else
+            echo "No CloudFront distribution ID configured, skipping"
+          fi
