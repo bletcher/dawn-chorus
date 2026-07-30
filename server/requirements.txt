@@ -1,0 +1,8 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+sqlalchemy>=2.0
+psycopg2-binary>=2.9      # PostgreSQL driver (RDS in production)
+pandas>=1.5
+numpy>=1.23
+astral>=3.2
+# also install the analysis engine from the repo root:  pip install -e ..
