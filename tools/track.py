@@ -7,12 +7,16 @@ a new card's WAVs into the audio folder and process only the *new* ones on reque
     python tools/track.py status  --audio data
     python tools/track.py process --audio data --lat 42.53 --lon -72.53 \
         --tz America/New_York --rebuild-site
+    python tools/track.py upload  --audio data --slug montague --api-key <site-key>
 
 `status`  reports how many recordings are tracked, which are new/changed/missing.
 `process` runs BirdNET-Analyzer on the new/changed recordings, records them in the manifest,
           and (with --rebuild-site) regenerates the dashboard.
+`upload`  sends detections for processed recordings to the shared API (the WAVs stay local);
+          each file is marked uploaded so re-runs only send what's new.
 
-Manifest defaults to <audio>/manifest.json. Requires `birdnet-analyzer` for `process`.
+Manifest defaults to <audio>/manifest.json. Requires `birdnet-analyzer` for `process` and a
+running dawn-chorus API (see server/) plus the site's key for `upload`.
 """
 from __future__ import annotations
 
@@ -160,6 +164,74 @@ def cmd_process(args):
         print(f"[site] {m['n_detections']:,} detections, {m['n_species']} species, {len(m['mornings'])} mornings")
 
 
+def _post(url, key, chunk):
+    """POST one batch of detections; return the server's inserted count."""
+    import urllib.error
+    import urllib.request
+    body = json.dumps(chunk).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST",
+                                 headers={"Content-Type": "application/json", "X-API-Key": key})
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read()).get("inserted", len(chunk))
+    except urllib.error.HTTPError as e:
+        sys.exit(f"upload failed ({e.code}) at {url}: {e.read().decode('utf-8', 'replace')[:200]}")
+    except urllib.error.URLError as e:
+        sys.exit(f"can't reach the API at {url}: {e.reason}")
+
+
+def cmd_upload(args):
+    """Push detections for processed-but-not-yet-uploaded recordings to the API.
+
+    Recordings stay local; only detections (dt, species, confidence) are sent. Each file is
+    marked uploaded in the manifest so re-running only sends new ones. The server keeps every
+    detection and filters by confidence at query time, so we upload at a low floor.
+    """
+    import pandas as pd
+
+    import dawnchorus as dc
+    audio = scan(args.audio)
+    man = load_manifest(args.manifest)
+    files = man.get("files", {})
+    results = args.results or str(Path(args.audio) / "results")
+
+    todo = [n for n in sorted(audio) if files.get(n)                       # processed
+            and (args.reupload or not files[n].get("uploaded_at"))]        # and not yet sent
+    if not todo:
+        print("nothing to upload — all processed recordings already sent (use --reupload to force).")
+        return
+    key = args.api_key or os.environ.get("DAWNCHORUS_API_KEY")
+    if not key:
+        sys.exit("no API key — pass --api-key or set DAWNCHORUS_API_KEY")
+
+    url = args.api_base.rstrip("/") + f"/sites/{args.slug}/detections"
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    total = 0
+    print(f"[upload] {len(todo)} recording(s) -> {url}  (floor >= {args.upload_min_confidence})")
+    for name in todo:
+        csv = result_csv(results, name)
+        dets = []
+        if csv:
+            try:
+                det = dc.load_birdnet_analyzer(csv, min_confidence=args.upload_min_confidence,
+                                               tz=args.tz, file_tz=args.file_tz)
+                for r in det.itertuples():
+                    d = pd.Timestamp(r.datetime).to_pydatetime()
+                    if d.tzinfo is not None:
+                        d = d.replace(tzinfo=None)                          # naive station-local
+                    dets.append({"dt": d.isoformat(), "scientific_name": str(r.scientific_name),
+                                 "common_name": str(r.common_name), "confidence": float(r.confidence)})
+            except ValueError:
+                dets = []                                                   # no detections in this file
+        sent = sum(_post(url, key, dets[i:i + args.batch]) for i in range(0, len(dets), args.batch))
+        files.setdefault(name, {}).update(uploaded_at=stamp, uploaded=sent)
+        total += sent
+        print(f"  {name:42} {sent:>5} detections")
+    man["files"] = files
+    Path(args.manifest).write_text(json.dumps(man, indent=2), encoding="utf-8")
+    print(f"[upload] {total:,} detections sent for site '{args.slug}'")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="Track recordings and process new ones on request")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -194,10 +266,27 @@ def main(argv=None):
     pr.add_argument("--classifier", default=None, help="path to a custom BirdNET classifier (default model if omitted)")
     pr.add_argument("--reprocess", action="store_true", help="re-run every recording, not just new/changed")
 
+    up = sub.add_parser("upload", help="push detections for processed recordings to the API")
+    up.add_argument("--audio", required=True)
+    up.add_argument("--slug", required=True, help="site slug on the server")
+    up.add_argument("--api-base", default="http://127.0.0.1:8001")
+    up.add_argument("--api-key", default=None, help="site upload key (or env DAWNCHORUS_API_KEY)")
+    up.add_argument("--tz", default=None, help="station tz; required only with --file-tz")
+    up.add_argument("--file-tz", dest="file_tz", default=None,
+                    help="tz stamped in filenames if not station-local (e.g. UTC for AudioMoth)")
+    up.add_argument("--upload-min-confidence", dest="upload_min_confidence", type=float, default=0.0,
+                    help="floor for uploaded detections; the server filters higher at query time")
+    up.add_argument("--results", default=None)
+    up.add_argument("--manifest", default=None)
+    up.add_argument("--batch", type=int, default=2000, help="detections per POST request")
+    up.add_argument("--reupload", action="store_true",
+                    help="re-send already-uploaded recordings (appends on the server)")
+
     args = p.parse_args(argv)
     if not getattr(args, "manifest", None):
         args.manifest = str(Path(args.audio) / MANIFEST_NAME)
-    {"status": cmd_status, "list": cmd_list, "process": cmd_process}[args.cmd](args)
+    {"status": cmd_status, "list": cmd_list, "process": cmd_process,
+     "upload": cmd_upload}[args.cmd](args)
 
 
 if __name__ == "__main__":
