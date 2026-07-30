@@ -1,9 +1,9 @@
 [
   {
     "slug": "montague",
-    "name": "Montague, MA (demo)",
-    "lat": 42.53,
-    "lon": -72.53,
+    "name": "North St, Montague, MA",
+    "lat": 42.537278,
+    "lon": -72.531694,
     "tz": "America/New_York",
     "n_detections": 3127,
     "first": "2026-07-25",
