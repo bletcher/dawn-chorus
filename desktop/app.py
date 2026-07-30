@@ -22,7 +22,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-for p in (str(ROOT), str(ROOT / "server")):        # dawnchorus + build_payload (dev; bundled in .exe)
+BASE = Path(getattr(sys, "_MEIPASS", str(HERE)))    # PyInstaller unpack dir when frozen, else desktop/
+for p in (str(ROOT), str(ROOT / "server")):         # dawnchorus + build_payload (dev; bundled in .exe)
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -33,7 +34,7 @@ def _model_dir() -> Path:
     """Where the three .tflite models live: next to the exe (bundled) or a BirdNET-Analyzer install."""
     if os.environ.get("BIRDNET_MODELS"):
         return Path(os.environ["BIRDNET_MODELS"])
-    bundled = HERE / "models"
+    bundled = BASE / "models"
     if (bundled / "model.tflite").exists() or (bundled / "BirdNET_GLOBAL_6K_V2.4_Model_FP32.tflite").exists():
         return bundled
     import importlib.util

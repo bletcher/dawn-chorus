@@ -261,6 +261,14 @@ automatically. The live site's **＋ Add data** button shows these exact steps. 
 someone else's instance? Run `build_payloads.py` for your site and open a PR with the new
 `site/data/<slug>.json` (and the updated `sites.json`), or send that one file to the maintainer.
 
+### No Python? The desktop app
+
+`desktop/` packages this whole flow — BirdNET on **LiteRT** (no TensorFlow) → site JSON — into a
+one-click executable, so a contributor can process recordings and produce a publishable
+`<slug>.json` with nothing installed. Recordings stay on their machine, and it reproduces
+BirdNET-Analyzer's output **byte-for-byte** (480/480 detections, Δ 0.0002). See
+[desktop/README.md](desktop/README.md).
+
 ### Optional: a live API (when static isn't enough)
 
 If you outgrow committing JSON and want live uploads, `server/` is a FastAPI + SQLAlchemy
