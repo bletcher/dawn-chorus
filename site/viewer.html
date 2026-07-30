@@ -262,11 +262,14 @@
 
 <script>
 window.__bootFetch = async function(boot){
-  const api = "http://127.0.0.1:8001";
+  const BASE = "./data", MODE = "static";                        // static JSON files, or a live API
+  const listUrl = MODE === "api" ? BASE + "/sites" : BASE + "/sites.json";
+  const dataUrl = s => MODE === "api" ? BASE + "/sites/" + encodeURIComponent(s) + "/data"
+                                      : BASE + "/" + encodeURIComponent(s) + ".json";
   const sub = document.getElementById("subline");
   let sites;
-  try { sites = await (await fetch(api + "/sites")).json(); }
-  catch (e) { sub.textContent = "Can't reach the API at " + api; return; }
+  try { sites = await (await fetch(listUrl)).json(); }
+  catch (e) { sub.textContent = "Can't load the site list (" + listUrl + ")"; return; }
   const slug = new URLSearchParams(location.search).get("site") || (sites[0] && sites[0].slug);
   const sel = document.createElement("select");
   sel.id = "siteSel"; sel.title = "Site";
@@ -281,10 +284,10 @@ window.__bootFetch = async function(boot){
   });
   const hb = document.querySelector(".hbtns");
   if (hb) hb.insertBefore(sel, hb.firstChild);
-  if (!slug) { sub.textContent = "No sites yet — add one via the API."; return; }
+  if (!slug) { sub.textContent = "No sites yet."; return; }
   let data;
-  try { data = await (await fetch(api + "/sites/" + encodeURIComponent(slug) + "/data")).json(); }
-  catch (e) { sub.textContent = "No data yet for " + slug; return; }
+  try { data = await (await fetch(dataUrl(slug))).json(); }
+  catch (e) { sub.textContent = "No data for " + slug; return; }
   boot(data);
 };
 </script>

@@ -171,11 +171,14 @@ def render_html(data: dict) -> str:
 # site's payload from the API, add a site picker to the masthead, then boot() on it.
 VIEWER_BOOTSTRAP = """<script>
 window.__bootFetch = async function(boot){
-  const api = %API%;
+  const BASE = %BASE%, MODE = %MODE%;                        // static JSON files, or a live API
+  const listUrl = MODE === "api" ? BASE + "/sites" : BASE + "/sites.json";
+  const dataUrl = s => MODE === "api" ? BASE + "/sites/" + encodeURIComponent(s) + "/data"
+                                      : BASE + "/" + encodeURIComponent(s) + ".json";
   const sub = document.getElementById("subline");
   let sites;
-  try { sites = await (await fetch(api + "/sites")).json(); }
-  catch (e) { sub.textContent = "Can't reach the API at " + api; return; }
+  try { sites = await (await fetch(listUrl)).json(); }
+  catch (e) { sub.textContent = "Can't load the site list (" + listUrl + ")"; return; }
   const slug = new URLSearchParams(location.search).get("site") || (sites[0] && sites[0].slug);
   const sel = document.createElement("select");
   sel.id = "siteSel"; sel.title = "Site";
@@ -190,17 +193,20 @@ window.__bootFetch = async function(boot){
   });
   const hb = document.querySelector(".hbtns");
   if (hb) hb.insertBefore(sel, hb.firstChild);
-  if (!slug) { sub.textContent = "No sites yet — add one via the API."; return; }
+  if (!slug) { sub.textContent = "No sites yet."; return; }
   let data;
-  try { data = await (await fetch(api + "/sites/" + encodeURIComponent(slug) + "/data")).json(); }
-  catch (e) { sub.textContent = "No data yet for " + slug; return; }
+  try { data = await (await fetch(dataUrl(slug))).json(); }
+  catch (e) { sub.textContent = "No data for " + slug; return; }
   boot(data);
 };
 </script>"""
 
 
-def render_viewer(api_base: str) -> str:
-    boot = VIEWER_BOOTSTRAP.replace("%API%", json.dumps(api_base))
+def render_viewer(base: str, mode: str) -> str:
+    """mode 'static' -> fetch <base>/sites.json + <base>/<slug>.json (files on S3/CloudFront);
+    mode 'api' -> fetch <base>/sites + <base>/sites/<slug>/data (the FastAPI server)."""
+    boot = (VIEWER_BOOTSTRAP.replace("%BASE%", json.dumps(base.rstrip("/")))
+                            .replace("%MODE%", json.dumps(mode)))
     return (TEMPLATE.replace("<!--__VIEWER_BOOTSTRAP__-->", boot)
                     .replace("/*__DATA__*/", ""))          # empty #data -> __bootFetch runs
 
@@ -225,9 +231,11 @@ def main(argv=None):
                    help="URL prefix the page uses to reach recordings (default ../data)")
     p.add_argument("--out", default="site/index.html")
     p.add_argument("--emit-viewer", action="store_true",
-                   help="also write viewer.html (multi-site page that fetches from --api-base)")
-    p.add_argument("--api-base", default="http://127.0.0.1:8001",
-                   help="API base URL the viewer fetches sites/data from")
+                   help="also write viewer.html (multi-site page; static JSON unless --api-base)")
+    p.add_argument("--api-base", default=None,
+                   help="if set, the viewer fetches from this live API instead of static JSON")
+    p.add_argument("--data-base", default="./data",
+                   help="URL/path of the static site JSON (sites.json + <slug>.json); default ./data")
     args = p.parse_args(argv)
 
     data = build_data(analyzer_path=args.from_analyzer, db_path=args.db, lat=args.lat,
@@ -242,8 +250,12 @@ def main(argv=None):
           f"{len(m['mornings'])} mornings)")
     if args.emit_viewer:
         vpath = out.parent / "viewer.html"
-        vpath.write_text(render_viewer(args.api_base), encoding="utf-8")
-        print(f"wrote {vpath}  (multi-site viewer -> {args.api_base})")
+        if args.api_base:
+            vpath.write_text(render_viewer(args.api_base, "api"), encoding="utf-8")
+            print(f"wrote {vpath}  (viewer -> live API {args.api_base})")
+        else:
+            vpath.write_text(render_viewer(args.data_base, "static"), encoding="utf-8")
+            print(f"wrote {vpath}  (viewer -> static JSON at {args.data_base})")
 
 
 TEMPLATE = r"""<!doctype html>

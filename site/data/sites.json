@@ -1,0 +1,12 @@
+[
+  {
+    "slug": "montague",
+    "name": "Montague, MA (demo)",
+    "lat": 42.53,
+    "lon": -72.53,
+    "tz": "America/New_York",
+    "n_detections": 3127,
+    "first": "2026-07-25",
+    "last": "2026-07-26"
+  }
+]
