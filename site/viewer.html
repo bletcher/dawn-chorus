@@ -1,252 +1,4 @@
-"""
-Build a self-contained dawn-chorus dashboard (Observable Plot) from a detection source.
-
-Runs the dawnchorus pipeline, then writes a single HTML file with the data embedded and
-interactive charts, all governed by one global **time scope** (Aggregate: day/week/month/
-year + a period slider). Move the slider and every chart recomputes for that set of mornings:
-  * Dawn timeline   - median onset->offset per species, coloured by median occupancy
-  * Cumulative call distributions (ECDF) - mean of the period's per-morning curves
-  * Occupancy heatmap - species x solar-minute, fraction of the period's mornings singing
-  * Species table   - per-species aggregates over the period
-
-The page holds only per-morning building blocks (per-species-per-bin detection counts and a
-per-morning onset/offset summary); the browser aggregates them up to the chosen grain, so the
-same file explores day-to-day detail or seasonal roll-ups without regenerating.
-
-Uses the Observable Plot *library* (vendored locally at `site/vendor/`) -- no Observable
-platform/account, no CDN, no build step, no server. Just open the file, or host `site/`.
-
-    python tools/build_site.py --from-analyzer data/results \
-        --lat 42.53 --lon -72.53 --tz America/New_York --min-confidence 0.5 \
-        --out site/index.html
-"""
-from __future__ import annotations
-
-import argparse
-import json
-import re
-import wave
-from datetime import date
-from pathlib import Path
-
-import numpy as np
-import pandas as pd
-
-import dawnchorus as dc
-from dawnchorus.phenology import DEFAULTS, _anchor_col
-
-
-def scan_audio(audio_dir, lat, lon, tz):
-    """Recordings -> {date: [{name, start-second-of-day, duration}]} plus the civil-dawn
-    second-of-day per date, so the page can turn a solar-minute back into file + offset."""
-    solar = dc.SolarModel(lat, lon, tz)
-    files = {}
-    for p in sorted(Path(audio_dir).glob("*.wav")):
-        m = re.search(r"(\d{8})_(\d{6})", p.name)
-        if not m:
-            continue
-        ymd, hms = m.group(1), m.group(2)
-        d = f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:8]}"
-        start = int(hms[:2]) * 3600 + int(hms[2:4]) * 60 + int(hms[4:6])
-        try:
-            with wave.open(str(p)) as w:
-                dur = round(w.getnframes() / w.getframerate(), 1)
-        except Exception:
-            dur = None
-        files.setdefault(d, []).append({"name": p.name, "s": start, "d": dur})
-    dawn = {}
-    for d in files:
-        y, mo, da = (int(x) for x in d.split("-"))
-        dw = solar.dawn(date(y, mo, da))
-        if dw is not None:
-            dawn[d] = dw.hour * 3600 + dw.minute * 60 + dw.second
-        files[d].sort(key=lambda f: f["s"])
-    return files, dawn
-
-
-def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
-               min_conf=0.5, file_tz=None, audio_dir=None, audio_base="../data", label_min_conf=0.25,
-               label_analyzer_path=None):
-    out = dc.run(db_path=db_path, analyzer_path=analyzer_path, latitude=lat, longitude=lon,
-                 tz=tz, min_confidence=min_conf, file_tz=file_tz)
-    det, ms = out["detections"], out["morning_summary"]
-
-    cfg = DEFAULTS
-    acol = _anchor_col(cfg["anchor"])            # min_from_dawn
-    lo, hi, bw = cfg["window_start_min"], cfg["window_end_min"], cfg["bin_min"]
-    win = det[(det[acol] >= lo) & (det[acol] < hi)].copy()
-
-    edges = np.arange(lo, hi + bw, bw)
-    nbins = len(edges) - 1
-    grid = [round(float(edges[i]) + bw / 2.0, 1) for i in range(nbins)]   # bin centres
-    win["bin"] = pd.cut(win[acol], edges, labels=False)                   # 0..nbins-1
-
-    totals = win.groupby("common_name").size().sort_values(ascending=False)
-    heat_set = {s for s in totals.index if totals[s] >= 5}
-    mean_t = win.groupby("common_name")[acol].mean().sort_values()        # earliest first
-    species = [s for s in mean_t.index if s in heat_set]
-    sp_idx = {s: i for i, s in enumerate(species)}
-
-    # Per-morning, per-species, per-bin detection COUNTS -- the one building block the page
-    # aggregates up to any grain (occupancy, mean-of-morning ECDF, quantile onset/offset).
-    hs = win[win["common_name"].isin(heat_set)].dropna(subset=["bin"]).copy()
-    hs["bin"] = hs["bin"].astype(int)
-    days = sorted(str(d) for d in hs["date"].unique())
-    day_idx = {d: i for i, d in enumerate(days)}
-    cnt = hs.groupby(["date", "common_name", "bin"]).size()
-    counts = [[day_idx[str(d)], sp_idx[s], int(b), int(c)] for (d, s, b), c in cnt.items()]
-
-    day_keys = {}
-    for d in days:
-        ts = pd.Timestamp(d); iso = ts.isocalendar()
-        day_keys[d] = {"year": f"{ts.year}", "month": f"{ts.year}-{ts.month:02d}",
-                       "week": f"{int(iso[0])}-W{int(iso[1]):02d}", "day": d}
-
-    s = ms.rename(columns={"scientific_name": "sci", "common_name": "name",
-                           "n_detections": "n", "onset_min": "onset", "offset_min": "offset",
-                           "span_min": "span", "peak_min": "peak", "occupancy": "occ"})
-    s["date"] = s["date"].astype(str)
-    s = s.round({"onset": 1, "offset": 1, "span": 1, "peak": 1, "occ": 2})
-    summary = json.loads(s[["date", "name", "sci", "n", "onset", "offset", "span",
-                            "peak", "occ"]].to_json(orient="records"))
-
-    # Top few detections per (date, species) by confidence -> the audiogram lands on a real
-    # call. Each entry is [solar-minute, confidence].
-    clips = {}
-    if "confidence" in win.columns:
-        for (d, sp), g in win.groupby(["date", "common_name"]):
-            top = g.nlargest(3, "confidence")
-            clips.setdefault(str(d), {})[sp] = [[round(float(r[acol]), 2), round(float(r["confidence"]), 2)]
-                                                for _, r in top.iterrows()]
-
-    # Every in-window detection per morning, for labelling the spectrogram:
-    # [solar-minute, species-index, confidence]. Reloaded down to `label_min_conf` so the
-    # spectrogram shows more calls than the (higher) analysis threshold used for the charts.
-    label_src = label_analyzer_path or analyzer_path      # labels can come from a denser (higher-overlap) run
-    if label_src:
-        det_lab = dc.load_birdnet_analyzer(label_src, min_confidence=label_min_conf,
-                                           latitude=lat, longitude=lon, tz=tz, file_tz=file_tz)
-    else:
-        det_lab = dc.load_detections(db_path, min_confidence=label_min_conf, latitude=lat, longitude=lon)
-    det_lab = dc.SolarModel(lat, lon, tz).annotate(det_lab)
-    winlab = det_lab[(det_lab[acol] >= lo) & (det_lab[acol] < hi)]
-    label_species = sorted(winlab["common_name"].unique().tolist())
-    lsp = {s: i for i, s in enumerate(label_species)}
-    dets_by_day = {}
-    for d, g in winlab.groupby("date"):
-        dets_by_day[str(d)] = [[round(float(a), 2), lsp[s], round(float(c), 2)]
-                               for s, a, c in zip(g["common_name"], g[acol], g["confidence"])]
-
-    valid = ms.dropna(subset=["onset_min"])
-    earliest = None
-    if not valid.empty:
-        r = valid.loc[valid["onset_min"].idxmin()]
-        earliest = {"name": r["common_name"], "onset": round(float(r["onset_min"]), 1)}
-
-    meta = {
-        "mornings": sorted(str(d) for d in pd.unique(ms["date"])),
-        "days": days,
-        "n_species": int(det["scientific_name"].nunique()),
-        "n_detections": int(len(det)),
-        "min_confidence": min_conf,
-        "lat": lat, "lon": lon, "tz": tz,
-        "window": [lo, hi], "bin": bw, "grid": grid,
-        "species": species,                                   # heatmap/ECDF order (earliest first)
-        "top_species": [s for s in totals.index if s in heat_set],   # by detections (ECDF default + colour)
-        "earliest": earliest,
-        "label_species": label_species,
-        "audio_base": audio_base,
-    }
-    audio, dawn = scan_audio(audio_dir, lat, lon, tz) if audio_dir else ({}, {})
-    return {"meta": meta, "summary": summary, "counts": counts, "day_keys": day_keys,
-            "audio": audio, "dawn": dawn, "clips": clips, "dets": dets_by_day}
-
-
-def render_html(data: dict) -> str:
-    return (TEMPLATE.replace("<!--__VIEWER_BOOTSTRAP__-->", "")
-                    .replace("/*__DATA__*/", json.dumps(data, allow_nan=False)))
-
-
-# Injected into viewer.html in place of embedded data: fetch the site list + the selected
-# site's payload from the API, add a site picker to the masthead, then boot() on it.
-VIEWER_BOOTSTRAP = """<script>
-window.__bootFetch = async function(boot){
-  const api = %API%;
-  const sub = document.getElementById("subline");
-  let sites;
-  try { sites = await (await fetch(api + "/sites")).json(); }
-  catch (e) { sub.textContent = "Can't reach the API at " + api; return; }
-  const slug = new URLSearchParams(location.search).get("site") || (sites[0] && sites[0].slug);
-  const sel = document.createElement("select");
-  sel.id = "siteSel"; sel.title = "Site";
-  sites.forEach(s => {
-    const o = document.createElement("option");
-    o.value = s.slug; o.textContent = s.name; o.selected = (s.slug === slug);
-    sel.appendChild(o);
-  });
-  sel.addEventListener("change", () => {
-    const p = new URLSearchParams(location.search); p.set("site", sel.value);
-    location.search = p.toString();                         // reload -> single clean boot
-  });
-  const hb = document.querySelector(".hbtns");
-  if (hb) hb.insertBefore(sel, hb.firstChild);
-  if (!slug) { sub.textContent = "No sites yet — add one via the API."; return; }
-  let data;
-  try { data = await (await fetch(api + "/sites/" + encodeURIComponent(slug) + "/data")).json(); }
-  catch (e) { sub.textContent = "No data yet for " + slug; return; }
-  boot(data);
-};
-</script>"""
-
-
-def render_viewer(api_base: str) -> str:
-    boot = VIEWER_BOOTSTRAP.replace("%API%", json.dumps(api_base))
-    return (TEMPLATE.replace("<!--__VIEWER_BOOTSTRAP__-->", boot)
-                    .replace("/*__DATA__*/", ""))          # empty #data -> __bootFetch runs
-
-
-def main(argv=None):
-    p = argparse.ArgumentParser(description="Build the dawn-chorus dashboard site")
-    src = p.add_mutually_exclusive_group(required=True)
-    src.add_argument("--db")
-    src.add_argument("--from-analyzer", dest="from_analyzer")
-    p.add_argument("--label-from-analyzer", dest="label_from_analyzer", default=None,
-                   help="separate (denser, e.g. higher-overlap) results folder for spectrogram labels only")
-    p.add_argument("--lat", type=float, required=True)
-    p.add_argument("--lon", type=float, required=True)
-    p.add_argument("--tz", required=True)
-    p.add_argument("--file-tz", dest="file_tz", default=None)
-    p.add_argument("--min-confidence", type=float, default=0.5)
-    p.add_argument("--label-min-confidence", dest="label_min_conf", type=float, default=0.25,
-                   help="confidence floor for spectrogram labels (charts use --min-confidence)")
-    p.add_argument("--audio", default=None,
-                   help="folder of WAV recordings (enables click-to-listen in daily scope)")
-    p.add_argument("--audio-url-base", dest="audio_base", default="../data",
-                   help="URL prefix the page uses to reach recordings (default ../data)")
-    p.add_argument("--out", default="site/index.html")
-    p.add_argument("--emit-viewer", action="store_true",
-                   help="also write viewer.html (multi-site page that fetches from --api-base)")
-    p.add_argument("--api-base", default="http://127.0.0.1:8001",
-                   help="API base URL the viewer fetches sites/data from")
-    args = p.parse_args(argv)
-
-    data = build_data(analyzer_path=args.from_analyzer, db_path=args.db, lat=args.lat,
-                      lon=args.lon, tz=args.tz, min_conf=args.min_confidence, file_tz=args.file_tz,
-                      audio_dir=args.audio, audio_base=args.audio_base, label_min_conf=args.label_min_conf,
-                      label_analyzer_path=args.label_from_analyzer)
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render_html(data), encoding="utf-8")
-    m = data["meta"]
-    print(f"wrote {out}  ({m['n_detections']:,} detections, {m['n_species']} species, "
-          f"{len(m['mornings'])} mornings)")
-    if args.emit_viewer:
-        vpath = out.parent / "viewer.html"
-        vpath.write_text(render_viewer(args.api_base), encoding="utf-8")
-        print(f"wrote {vpath}  (multi-site viewer -> {args.api_base})")
-
-
-TEMPLATE = r"""<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -508,8 +260,35 @@ TEMPLATE = r"""<!doctype html>
   </div>
 </div>
 
-<!--__VIEWER_BOOTSTRAP__-->
-<script type="application/json" id="data">/*__DATA__*/</script>
+<script>
+window.__bootFetch = async function(boot){
+  const api = "http://127.0.0.1:8001";
+  const sub = document.getElementById("subline");
+  let sites;
+  try { sites = await (await fetch(api + "/sites")).json(); }
+  catch (e) { sub.textContent = "Can't reach the API at " + api; return; }
+  const slug = new URLSearchParams(location.search).get("site") || (sites[0] && sites[0].slug);
+  const sel = document.createElement("select");
+  sel.id = "siteSel"; sel.title = "Site";
+  sites.forEach(s => {
+    const o = document.createElement("option");
+    o.value = s.slug; o.textContent = s.name; o.selected = (s.slug === slug);
+    sel.appendChild(o);
+  });
+  sel.addEventListener("change", () => {
+    const p = new URLSearchParams(location.search); p.set("site", sel.value);
+    location.search = p.toString();                         // reload -> single clean boot
+  });
+  const hb = document.querySelector(".hbtns");
+  if (hb) hb.insertBefore(sel, hb.firstChild);
+  if (!slug) { sub.textContent = "No sites yet — add one via the API."; return; }
+  let data;
+  try { data = await (await fetch(api + "/sites/" + encodeURIComponent(slug) + "/data")).json(); }
+  catch (e) { sub.textContent = "No data yet for " + slug; return; }
+  boot(data);
+};
+</script>
+<script type="application/json" id="data"></script>
 <script>
 function boot(DATA){
 const {meta, summary, counts, day_keys} = DATA;
@@ -895,8 +674,3 @@ renderSubline(); renderTiles(); renderFoot(); buildChips(); rebuildPeriods();
 </script>
 </body>
 </html>
-"""
-
-
-if __name__ == "__main__":
-    main()
