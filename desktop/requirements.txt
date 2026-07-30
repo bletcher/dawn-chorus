@@ -1,0 +1,10 @@
+# Desktop app — TF-free BirdNET (LiteRT). See desktop/README.md.
+ai-edge-litert>=1.0     # lightweight TFLite runtime (runs BirdNET incl. RFFT2D; no TensorFlow)
+librosa>=0.10           # audio load + kaiser_fast resample (matches BirdNET-Analyzer exactly)
+numpy>=1.23
+pandas>=1.5
+# also needs the analysis engine + payload builder from this repo:
+#   pip install -e ..                 # dawnchorus
+#   (build_payload is ../server/payload.py; app.py adds ../server to sys.path in dev)
+# packaging:
+#   pyinstaller>=6.0

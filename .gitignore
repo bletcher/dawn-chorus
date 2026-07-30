@@ -26,6 +26,15 @@ manifest.json
 # Local click-to-listen dashboard (needs the recordings; the public site is site/index.html)
 site/dashboard-local.html
 
+# In-browser BirdNET spike (large model + WASM; experimental)
+_bnet_spike/
+
+# Desktop app: bundled models (large, fetched from birdnet-analyzer) + build output
+desktop/models/
+desktop/build/
+desktop/dist/
+dawn-chorus-output/
+
 # Keep the example config despite the csv rule above
 !config.example.yaml
 
