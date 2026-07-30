@@ -211,54 +211,54 @@ python tools/process_cards.py --audio data --lat 42.53 --lon -72.53 --tz America
 python tools/track.py process --audio data --lat 42.53 --lon -72.53 \
     --tz America/New_York --rebuild-site
 
-# view it — range server lets the audio seek; open http://127.0.0.1:8000/site/
-python tools/serve.py
+# view it locally — range server lets the audio seek; open site/dashboard-local.html
+python tools/serve.py    # http://127.0.0.1:8000/site/dashboard-local.html
 ```
 
-The page uses the Observable Plot *library*, vendored under `site/vendor/` — no CDN, no
-platform, opens offline. Click-to-listen needs the recordings served (that's what
-`serve.py` is for; it serves the repo root so `/data/` recordings are reachable). Build a
-one-off directly with `tools/build_site.py --from-analyzer <results> --audio <wavs> …`.
+This click-to-listen dashboard is a **local tool** (it needs the recordings, so it's written to
+the git-ignored `site/dashboard-local.html`). It uses the Observable Plot *library*, vendored
+under `site/vendor/` — no CDN, no platform, opens offline. `serve.py` serves the repo root so
+`/data/` recordings are reachable. Build one directly with `tools/build_site.py
+--from-analyzer <results> --audio <wavs> …`.
 
-## Multi-site platform (server)
+## Multi-site, hosted for $0
 
-The dashboard above is single-site and self-contained. To let **several people contribute** —
-each running BirdNET on their own recordings, which never leave their machine, while the
-**detections** land in a shared database you can browse per site — there's a small API in
-`server/`:
+To publish **several sites** that anyone can browse — each contributor running BirdNET on their
+own recordings, which never leave their machine — you need no server and no database. The
+browser only needs each site's finished payload, so precompute it and serve it as static JSON
+from the S3/CloudFront you already have:
 
 ```bash
-cd server
-pip install -r requirements.txt && pip install -e ..   # deps + the dawnchorus engine
-python seed.py                                          # load data/results as demo site "montague"
-uvicorn app:app --port 8001                             # http://127.0.0.1:8001/docs
+# 1. precompute a site's payload (recordings stay local; only phenology goes up)
+python tools/build_payloads.py --slug montague --name "Montague, MA" \
+    --from-analyzer data/results --lat 42.53 --lon -72.53 --tz America/New_York
+#    -> site/data/montague.json  +  site/data/sites.json (the picker index)
+
+# 2. build the public viewer — a static shell that fetches those files
+python tools/build_viewer.py                 # -> site/index.html (reads ./data)
+
+# 3. commit site/ and push; the deploy workflow publishes it. $0 — just static files.
 ```
 
-It's FastAPI + SQLAlchemy (SQLite locally, Postgres/RDS in production via `DATABASE_URL`).
-`payload.build_payload()` recomputes the dashboard JSON straight from the database with the
-same `dawnchorus` engine, so a hosted site is byte-identical to the static build — minus
-click-to-listen, since recordings stay on the contributor's machine. Endpoints: `POST /sites`
-(→ slug + one-time upload key), `GET /sites`, `POST /sites/{slug}/detections` (header
-`X-API-Key`), `GET /sites/{slug}/data`.
+`site/index.html` is the deployed landing (site-picker + all charts, no audio card). Adding a
+site = run step 1 for it (send the JSON or open a PR) and redeploy.
 
-**The viewer** is the same dashboard, generated to fetch from the API instead of embedding
-data — it adds a site-picker and drops the audio card automatically:
+### Optional: a live API (when static isn't enough)
+
+If you outgrow committing JSON and want live uploads, `server/` is a FastAPI + SQLAlchemy
+service with the **same payload contract**, so the viewer switches with one flag:
 
 ```bash
-python tools/build_site.py --from-analyzer data/results --lat 42.53 --lon -72.53 \
-    --tz America/New_York --emit-viewer --api-base http://127.0.0.1:8001
-# then, with serve.py running:  http://127.0.0.1:8000/site/viewer.html?site=montague
+cd server && pip install -r requirements.txt && pip install -e ..
+python seed.py && uvicorn app:app --port 8001              # http://127.0.0.1:8001/docs
+python tools/build_viewer.py --api-base http://127.0.0.1:8001   # viewer -> live API
+python tools/track.py upload --audio data --slug montague --api-key <key>   # push detections
 ```
 
-**Uploading.** After processing recordings locally, push their detections to your site:
-
-```bash
-python tools/track.py upload --audio data --slug <your-site> --api-key <key>
-```
-
-It sends per-file and marks each recording uploaded in the manifest, so re-runs send only
-new recordings — the WAVs never leave your machine. (The demo `montague` site is seeded
-directly by `server/seed.py`; don't `upload --slug montague` or you'll duplicate it.)
+Endpoints: `POST /sites` (→ slug + one-time key), `GET /sites`, `POST /sites/{slug}/detections`
+(header `X-API-Key`), `GET /sites/{slug}/data`. SQLite locally; point `DATABASE_URL` at
+Postgres/RDS in production. (The demo `montague` is seeded by `server/seed.py`; don't
+`upload --slug montague` or you'll duplicate it.)
 
 ## Layout
 
@@ -276,15 +276,17 @@ dawnchorus/
 tools/
   make_synthetic_db.py   demo DB + mock weather cache (temp-driven onset)
   process_cards.py       one command: recordings -> BirdNET-Analyzer -> dashboard
-  track.py               manifest tracking: analyse only NEW recordings; `upload` to the API
-  build_site.py          generate the dashboard (static) or --emit-viewer (fetches the API)
-  serve.py               range-capable dev server (audio seeking) for the dashboard
-server/          multi-site API — FastAPI + SQLAlchemy over the dawnchorus engine
+  build_site.py          local click-to-listen dashboard (dashboard-local.html; needs recordings)
+  build_payloads.py      precompute per-site static JSON (site/data/) for the hosted viewer
+  build_viewer.py        the public multi-site viewer (site/index.html; static JSON or --api-base)
+  track.py               manifest tracking: analyse only NEW recordings; `upload` to a live API
+  serve.py               range-capable dev server (audio seeking) for the local dashboard
+server/          OPTIONAL live API — FastAPI + SQLAlchemy over the dawnchorus engine
   app.py           sites + detections store, per-site key auth, /sites/{slug}/data
   payload.py       rebuild the dashboard JSON from the DB (server-side build_data)
   seed.py          load the current data/results as demo site "montague"
 tests/           pytest suite (unit + end-to-end signal-recovery)
-site/            generated dashboard + vendored d3/Plot (index.html static, viewer.html API)
+site/            index.html (public viewer) + data/*.json (payloads) + vendored d3/Plot
 ```
 
 MIT. BirdNET model and station software are separate projects by their authors

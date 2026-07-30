@@ -23,6 +23,9 @@ results*/
 # Local processing state (machine-specific mtimes)
 manifest.json
 
+# Local click-to-listen dashboard (needs the recordings; the public site is site/index.html)
+site/dashboard-local.html
+
 # Keep the example config despite the csv rule above
 !config.example.yaml
 

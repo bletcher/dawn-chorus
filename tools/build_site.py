@@ -229,13 +229,9 @@ def main(argv=None):
                    help="folder of WAV recordings (enables click-to-listen in daily scope)")
     p.add_argument("--audio-url-base", dest="audio_base", default="../data",
                    help="URL prefix the page uses to reach recordings (default ../data)")
-    p.add_argument("--out", default="site/index.html")
-    p.add_argument("--emit-viewer", action="store_true",
-                   help="also write viewer.html (multi-site page; static JSON unless --api-base)")
-    p.add_argument("--api-base", default=None,
-                   help="if set, the viewer fetches from this live API instead of static JSON")
-    p.add_argument("--data-base", default="./data",
-                   help="URL/path of the static site JSON (sites.json + <slug>.json); default ./data")
+    p.add_argument("--out", default="site/dashboard-local.html",
+                   help="local click-to-listen dashboard (git-ignored); the public site is the viewer "
+                        "from build_viewer.py")
     args = p.parse_args(argv)
 
     data = build_data(analyzer_path=args.from_analyzer, db_path=args.db, lat=args.lat,
@@ -248,14 +244,6 @@ def main(argv=None):
     m = data["meta"]
     print(f"wrote {out}  ({m['n_detections']:,} detections, {m['n_species']} species, "
           f"{len(m['mornings'])} mornings)")
-    if args.emit_viewer:
-        vpath = out.parent / "viewer.html"
-        if args.api_base:
-            vpath.write_text(render_viewer(args.api_base, "api"), encoding="utf-8")
-            print(f"wrote {vpath}  (viewer -> live API {args.api_base})")
-        else:
-            vpath.write_text(render_viewer(args.data_base, "static"), encoding="utf-8")
-            print(f"wrote {vpath}  (viewer -> static JSON at {args.data_base})")
 
 
 TEMPLATE = r"""<!doctype html>

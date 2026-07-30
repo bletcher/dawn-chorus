@@ -57,7 +57,7 @@ def main(argv=None):
     p.add_argument("--overlap", type=float, default=0.0, help="0-2.9s window overlap (higher = more detections, slower)")
     p.add_argument("--sensitivity", type=float, default=1.0, help="0.5-1.5; higher = more eager detections")
     p.add_argument("--threads", type=int, default=0, help="0 = auto (CPU count)")
-    p.add_argument("--out-site", default="site/index.html")
+    p.add_argument("--out-site", default="site/dashboard-local.html")
     p.add_argument("--skip-analyze", action="store_true",
                    help="reuse existing result CSVs; only rebuild the site")
     args = p.parse_args(argv)

@@ -262,7 +262,7 @@ def main(argv=None):
     pr.add_argument("--results", default=None)
     pr.add_argument("--manifest", default=None)
     pr.add_argument("--rebuild-site", action="store_true")
-    pr.add_argument("--out-site", default="site/index.html")
+    pr.add_argument("--out-site", default="site/dashboard-local.html")
     pr.add_argument("--classifier", default=None, help="path to a custom BirdNET classifier (default model if omitted)")
     pr.add_argument("--reprocess", action="store_true", help="re-run every recording, not just new/changed")
 
