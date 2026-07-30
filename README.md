@@ -240,8 +240,26 @@ python tools/build_viewer.py                 # -> site/index.html (reads ./data)
 # 3. commit site/ and push; the deploy workflow publishes it. $0 — just static files.
 ```
 
-`site/index.html` is the deployed landing (site-picker + all charts, no audio card). Adding a
-site = run step 1 for it (send the JSON or open a PR) and redeploy.
+`site/index.html` is the deployed landing (site-picker + all charts, no audio card); rebuild it
+only when the template changes. Anyone can **browse** the published site — no account, just the
+URL and the picker.
+
+### Adding data or a new site
+
+Once it's set up, publishing new mornings (or a new site) is one command — `publish.py`
+regenerates the JSON, commits it, and pushes (which triggers the deploy). Detect the new
+recordings first, then publish:
+
+```bash
+python tools/track.py process --audio data --lat 42.537278 --lon -72.531694 --tz America/New_York
+python tools/publish.py --slug montague --name "North St, Montague, MA" \
+    --from-analyzer data/results --lat 42.537278 --lon -72.531694 --tz America/New_York --push
+```
+
+A new site is the same with a fresh `--slug` / `--name` / coordinates — it joins the picker
+automatically. The live site's **＋ Add data** button shows these exact steps. Contributing to
+someone else's instance? Run `build_payloads.py` for your site and open a PR with the new
+`site/data/<slug>.json` (and the updated `sites.json`), or send that one file to the maintainer.
 
 ### Optional: a live API (when static isn't enough)
 
@@ -279,6 +297,7 @@ tools/
   build_site.py          local click-to-listen dashboard (dashboard-local.html; needs recordings)
   build_payloads.py      precompute per-site static JSON (site/data/) for the hosted viewer
   build_viewer.py        the public multi-site viewer (site/index.html; static JSON or --api-base)
+  publish.py             one command: regenerate a site's JSON, commit, and push it live
   track.py               manifest tracking: analyse only NEW recordings; `upload` to a live API
   serve.py               range-capable dev server (audio seeking) for the local dashboard
 server/          OPTIONAL live API — FastAPI + SQLAlchemy over the dawnchorus engine

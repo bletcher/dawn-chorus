@@ -303,6 +303,12 @@ TEMPLATE = r"""<!doctype html>
   .dialog p{margin:0 0 8px} .dialog ul{margin:0 0 8px; padding-left:20px} .dialog li{margin:2px 0}
   .dialog b, .dialog strong{color:var(--ink); font-weight:600}
   .dialog .tag{color:var(--dawn)} .dialog .muted{color:var(--muted); font-weight:400}
+  .dialog ol{margin:0 0 10px; padding-left:20px} .dialog ol li{margin:6px 0}
+  .dialog pre{background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px;
+    overflow-x:auto; font-size:12px; line-height:1.5; white-space:pre; margin:6px 0; color:var(--ink)}
+  .copybtn{font:inherit; font-size:11px; padding:3px 10px; border-radius:6px; border:1px solid var(--line);
+    background:var(--surface); color:var(--ink2); cursor:pointer; margin:0 0 10px}
+  .copybtn:hover{border-color:var(--accent); color:var(--ink)}
   .close{position:absolute; top:10px; right:14px; background:none; border:none; color:var(--muted);
     font-size:26px; line-height:1; cursor:pointer; padding:2px 6px}
   .close:hover{color:var(--ink)}
@@ -373,6 +379,7 @@ TEMPLATE = r"""<!doctype html>
       <div class="sub" id="subline"></div>
     </div>
     <div class="hbtns">
+      <button class="theme" id="addBtn" aria-haspopup="dialog">＋ Add data</button>
       <button class="theme" id="guideBtn" aria-haspopup="dialog">Guide</button>
       <button class="theme" id="theme" aria-label="Toggle light or dark theme">◐ Theme</button>
     </div>
@@ -485,7 +492,9 @@ TEMPLATE = r"""<!doctype html>
       <li><b>Per-species table</b> — the same measures, aggregated over the period.</li>
     </ul>
 
-    <h3>Listen &amp; spectrograms <span class="muted">(Daily scope)</span></h3>
+    <h3>Listen &amp; spectrograms <span class="muted">(local dashboard, Daily scope)</span></h3>
+    <p class="muted">Click-to-listen works when you run the dashboard on the machine that holds the
+      recordings — not on the published site, where the audio stays local.</p>
     <ul>
       <li><b>Click a chart</b> — it snaps to the nearest call and shows a ~5-second <b>spectrogram</b>
         with each detected species boxed and labelled (name + confidence).</li>
@@ -505,6 +514,35 @@ TEMPLATE = r"""<!doctype html>
       <li>Detectability depends on distance, wind, and the mic — keep the recorder fixed across the
         season for comparisons to hold.</li>
     </ul>
+
+    <h3>Adding your own data</h3>
+    <p>New mornings, or a whole new site? Use the <span class="tag">＋ Add data</span> button in the
+      header — it walks through the short local step. Recordings stay on your machine; only the
+      detection times are published.</p>
+  </div>
+</div>
+
+<div class="modal" id="addModal" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-label="Add data">
+    <button class="close" id="addClose" aria-label="Close">&times;</button>
+    <h2 class="display">Add data</h2>
+    <p>This site is <b>static</b> — the charts are precomputed files, so there's no upload in the
+      browser. You add data with a short step on the machine that has the recordings; they never leave
+      it (only detection times are published). About a minute, start to finish.</p>
+
+    <h3>1 &middot; New mornings for a site you already have</h3>
+    <p>Drop the new recordings in your audio folder, then detect on just the new files:</p>
+    <pre>python tools/track.py process --audio data --lat 42.537278 --lon -72.531694 --tz America/New_York</pre>
+    <p>Regenerate this site's data and publish it (commits &amp; pushes &rarr; live in ~1&nbsp;min):</p>
+    <pre>python tools/publish.py --slug montague --name "North St, Montague, MA" --from-analyzer data/results --lat 42.537278 --lon -72.531694 --tz America/New_York --push</pre>
+
+    <h3>2 &middot; A whole new site</h3>
+    <p>Same commands with a new <span class="tag">--slug</span>, <span class="tag">--name</span>, and
+      your station's coordinates — it's added to the picker automatically.</p>
+    <p class="muted">Contributing to someone else's instance? Run <span class="tag">build_payloads.py</span>
+      for your site and open a pull request with the new <span class="tag">site/data/&lt;slug&gt;.json</span>
+      (and the updated <span class="tag">sites.json</span>) — or send that one file to the maintainer.
+      Full details are in the project README.</p>
   </div>
 </div>
 
@@ -878,11 +916,20 @@ document.getElementById("nextDet").onclick = ()=>{ if(cur && cur.list && cur.pos
 })();
 document.getElementById("theme").onclick = ()=>{ const curTheme=root.getAttribute("data-theme") ||
     (matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"); root.setAttribute("data-theme", curTheme==="dark"?"light":"dark"); renderAll(); };
-(function(){ const g=document.getElementById("guide");
-  document.getElementById("guideBtn").onclick=()=>{ g.hidden=false; };
-  document.getElementById("guideClose").onclick=()=>{ g.hidden=true; };
-  g.addEventListener("click", e=>{ if(e.target===g) g.hidden=true; });   // backdrop closes
-  addEventListener("keydown", e=>{ if(e.key==="Escape") g.hidden=true; });
+(function(){
+  function wire(modalId, btnId){ const m=document.getElementById(modalId); if(!m) return null;
+    const b=document.getElementById(btnId); if(b) b.onclick=()=>{ m.hidden=false; };
+    const c=m.querySelector(".close"); if(c) c.onclick=()=>{ m.hidden=true; };
+    m.addEventListener("click", e=>{ if(e.target===m) m.hidden=true; });   // backdrop closes
+    return m; }
+  const modals=[wire("guide","guideBtn"), wire("addModal","addBtn")].filter(Boolean);
+  addEventListener("keydown", e=>{ if(e.key==="Escape") modals.forEach(m=>m.hidden=true); });
+  document.querySelectorAll("#addModal pre").forEach(pre=>{           // copy-to-clipboard on commands
+    const b=document.createElement("button"); b.type="button"; b.className="copybtn"; b.textContent="Copy";
+    b.onclick=()=>{ if(navigator.clipboard) navigator.clipboard.writeText(pre.textContent.trim());
+      b.textContent="Copied ✓"; setTimeout(()=>{ b.textContent="Copy"; }, 1200); };
+    pre.parentNode.insertBefore(b, pre.nextSibling);
+  });
 })();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", ()=>{ if(!root.hasAttribute("data-theme")) renderAll(); });
 let rz; addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(()=>{ renderAll(); renderClip(); }, 180); });
