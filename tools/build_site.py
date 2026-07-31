@@ -459,6 +459,22 @@ TEMPLATE = r"""<!doctype html>
   </section>
 
   <section class="card">
+    <h2 class="display">Onset vs.&nbsp;temperature</h2>
+    <p class="lead">Each dot is a species on one morning: its onset (minutes from <span class="tag">civil
+      dawn</span>) against the temperature at dawn &mdash; the founding question, <em>does the chorus start
+      earlier on warm mornings?</em> A downward trend says yes. Per-species trend lines appear once a
+      species has &ge;4 mornings in the period; treat pooled patterns cautiously (weather confounds season).</p>
+    <div class="plot" id="chart-temp"></div>
+  </section>
+
+  <section class="card">
+    <h2 class="display">Onset vs.&nbsp;rain</h2>
+    <p class="lead">Onset against total rainfall over the morning window (mm). Points sit at 0 on dry
+      mornings; a rightward shift on wet mornings would show birds starting later in the rain.</p>
+    <div class="plot" id="chart-rain"></div>
+  </section>
+
+  <section class="card">
     <h2 class="display">Per-species table</h2>
     <p class="lead">Aggregated over the scoped period: mornings present, total detections, and median
       onset/offset/span/peak/occupancy (minutes from civil dawn).</p>
@@ -860,6 +876,32 @@ function renderHeat(S){
   wireTimeClicks(el, S);
 }
 
+function renderWeather(S, key, elId, xlabel){
+  const el=document.getElementById(elId); el.innerHTML="";
+  const wx = DATA.weather || {};
+  if(!S.some(d=> wx[d] && wx[d][key]!=null)){
+    el.innerHTML='<p class="empty">No weather for this period yet &mdash; it fills in when mornings are generated with a network connection.</p>'; return; }
+  const set=new Set(S), pts=[];
+  summary.forEach(r=>{ if(!set.has(r.date) || r.onset==null) return;
+    const w=wx[r.date]; if(!w || w[key]==null) return;
+    pts.push({name:r.name, x:w[key], y:r.onset}); });
+  if(!pts.length){ el.innerHTML='<p class="empty">No onsets to compare in this period.</p>'; return; }
+  // per-species regression only where a species spans >=4 distinct mornings (else the line is meaningless)
+  const xs={}; pts.forEach(p=>{ (xs[p.name]=xs[p.name]||new Set()).add(p.x); });
+  const fitPts=pts.filter(p=> xs[p.name].size>=4 && colorFor[p.name]);
+  const marks=[
+    Plot.ruleY([0], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
+    Plot.dot(pts, {x:"x", y:"y", fill:d=>colorFor[d.name]||css("--muted"), r:3.6, fillOpacity:.85,
+      stroke:css("--surface"), strokeWidth:.6, tip:true,
+      title:d=>`${d.name}\n${xlabel}: ${fmt(d.x,1)}\nonset ${fmt(d.y,0)} min from dawn`}),
+  ];
+  if(fitPts.length && Plot.linearRegressionY)
+    marks.push(Plot.linearRegressionY(fitPts, {x:"x", y:"y", stroke:d=>colorFor[d.name], z:"name", strokeWidth:1.5, ci:0}));
+  el.append(Plot.plot({ width:W(el), height:360, marginLeft:54, marginRight:20, style:plotStyle(),
+    x:{label:xlabel, grid:true}, y:{label:"onset — min from civil dawn ↑", grid:true},
+    marks}));
+}
+
 function renderTable(S){
   const g=aggBySpecies(S);
   const rows=Object.keys(g).map(name=>{ const rs=g[name];
@@ -894,7 +936,10 @@ function buildChips(){
 }
 
 function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S);
-  renderTimeline(S); renderEcdf(S); renderHeat(S); renderTable(S); updateAudioCard(S); }
+  renderTimeline(S); renderEcdf(S); renderHeat(S);
+  renderWeather(S,"t","chart-temp","temperature at dawn (°C)");
+  renderWeather(S,"r","chart-rain","rain over the window (mm)");
+  renderTable(S); updateAudioCard(S); }
 
 aggSel.onchange = rebuildPeriods;
 slider.oninput = renderAll;

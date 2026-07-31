@@ -21,13 +21,16 @@ from dawnchorus.phenology import DEFAULTS, _anchor_col
 
 
 def build_payload(det_all: pd.DataFrame, lat: float, lon: float, tz: str,
-                  min_conf: float = 0.5, label_min_conf: float = 0.25) -> dict:
+                  min_conf: float = 0.5, label_min_conf: float = 0.25,
+                  weather: bool = True, weather_cache: str | None = None,
+                  weather_source: str = "archive") -> dict:
     """det_all: columns datetime (naive/aware local), scientific_name, common_name, confidence."""
     cfg = DEFAULTS
     acol = _anchor_col(cfg["anchor"])                       # min_from_dawn
     lo, hi, bw = cfg["window_start_min"], cfg["window_end_min"], cfg["bin_min"]
 
-    ann = dc.SolarModel(lat, lon, tz).annotate(det_all)
+    model = dc.SolarModel(lat, lon, tz)
+    ann = model.annotate(det_all)
     ann["date"] = pd.to_datetime(ann["datetime"]).dt.date
 
     # --- charts: detections at >= min_conf ---
@@ -83,6 +86,22 @@ def build_payload(det_all: pd.DataFrame, lat: float, lon: float, tz: str,
         r = valid.loc[valid["onset_min"].idxmin()]
         earliest = {"name": r["common_name"], "onset": round(float(r["onset_min"]), 1)}
 
+    # --- per-morning weather (Open-Meteo): temperature at dawn + rain over the window ---
+    wx_by_day = {}
+    if weather:
+        try:
+            from dawnchorus import weather as _wx
+            mdays = sorted(pd.unique(ms["date"]))          # NB: don't shadow `days` (string dates in meta)
+            hourly = _wx.fetch_hourly(lat, lon, min(mdays), max(mdays), tz,
+                                      cache_path=weather_cache, source=weather_source)
+            mw = _wx.morning_weather(hourly, model, mdays)
+            for r in mw.itertuples():
+                t, rain = getattr(r, "temp_at_anchor", np.nan), getattr(r, "precip_sum", np.nan)
+                wx_by_day[str(r.date)] = {"t": None if pd.isna(t) else round(float(t), 1),
+                                          "r": None if pd.isna(rain) else round(float(rain), 2)}
+        except Exception:
+            wx_by_day = {}     # no network / no coverage -> charts show "weather not available yet"
+
     meta = {
         "mornings": sorted(str(d) for d in pd.unique(ms["date"])),
         "days": days,
@@ -96,4 +115,5 @@ def build_payload(det_all: pd.DataFrame, lat: float, lon: float, tz: str,
         "earliest": earliest,
         "label_species": label_species,
     }
-    return {"meta": meta, "summary": summary, "counts": counts, "day_keys": day_keys, "dets": dets_by_day}
+    return {"meta": meta, "summary": summary, "counts": counts, "day_keys": day_keys,
+            "dets": dets_by_day, "weather": wx_by_day}
