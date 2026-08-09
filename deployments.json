@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "Sites and the recorders deployed at them. A site is a PLACE; a deployment is a",
+    "recorder listening there, with its own audio folder. Two boxes at one place are two",
+    "deployments of one site - never two sites, because the location's history has to stay",
+    "continuous across a hardware swap.",
+    "",
+    "This is the single source of truth for run.ps1 and the local web app, so coordinates,",
+    "timezone and recorder id are stated once instead of being retyped as flags (and",
+    "mistyped: a wrong recorder silently mis-parses filenames or shifts every solar time).",
+    "Recorder ids must exist in dawnchorus/recorders.py.",
+    "",
+    "Audio folders are gitignored; only detections and the site JSON are ever published."
+  ],
+  "sites": {
+    "montague": {
+      "name": "North St, Montague, MA",
+      "lat": 42.537278,
+      "lon": -72.531694,
+      "tz": "America/New_York",
+      "primary": "sm",
+      "deployments": {
+        "sm": {
+          "audio": "data",
+          "recorder": "song-meter-micro-2",
+          "unit": "2MM43813",
+          "note": "Original box. 1-hour files, dawn-relative schedule. Baseline since 2026-07-25."
+        },
+        "owl": {
+          "audio": "data_owl",
+          "recorder": "owl-sense",
+          "unit": "e74d3",
+          "note": "Trial box, co-located with sm on 2026-08-06/07. 2-hour files. Scores ~0.1 lower confidence than the Song Meter (species-dependent), so its detections are NOT composition-comparable with sm - see tools/compare_recorders.py."
+        }
+      }
+    }
+  }
+}

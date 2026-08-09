@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
+import warnings
 import wave
 from datetime import date
 from pathlib import Path
@@ -33,27 +33,49 @@ import numpy as np
 import pandas as pd
 
 import dawnchorus as dc
+from dawnchorus import recorders as rec
 from dawnchorus.phenology import DEFAULTS, _anchor_col
 
 
-def scan_audio(audio_dir, lat, lon, tz):
+def scan_audio(audio_dir, lat, lon, tz, recorder=None):
     """Recordings -> {date: [{name, start-second-of-day, duration}]} plus the civil-dawn
-    second-of-day per date, so the page can turn a solar-minute back into file + offset."""
+    second-of-day per date, so the page can turn a solar-minute back into file + offset.
+
+    Filenames are parsed through the recorder's convention (sniffed when not named). This
+    used to hardcode the Song Meter pattern and silently skip anything else, which meant a
+    recorder like the Owl Sense produced charts with no click-to-listen and no explanation.
+    """
     solar = dc.SolarModel(lat, lon, tz)
-    files = {}
-    for p in sorted(Path(audio_dir).glob("*.wav")):
-        m = re.search(r"(\d{8})_(\d{6})", p.name)
-        if not m:
+    # One glob, filtered by suffix: globbing "*.wav" AND "*.WAV" double-counts every file
+    # on Windows, where the pattern match is already case-insensitive.
+    paths = sorted(p for p in Path(audio_dir).glob("*") if p.suffix.lower() == ".wav")
+    names = [p.name for p in paths]
+    prof = rec.get(recorder)
+    conv = None
+    if prof is not None:
+        conv = rec.CONVENTIONS_BY_ID.get(prof.resolve(names).convention or "")
+    conv = conv or rec.sniff(names)
+
+    files, skipped = {}, []
+    for p in paths:
+        t = conv.parse(p.name) if conv else None
+        if t is None:
+            skipped.append(p.name)
             continue
-        ymd, hms = m.group(1), m.group(2)
-        d = f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:8]}"
-        start = int(hms[:2]) * 3600 + int(hms[2:4]) * 60 + int(hms[4:6])
+        d = t.strftime("%Y-%m-%d")
+        start = t.hour * 3600 + t.minute * 60 + t.second
         try:
             with wave.open(str(p)) as w:
                 dur = round(w.getnframes() / w.getframerate(), 1)
         except Exception:
             dur = None
         files.setdefault(d, []).append({"name": p.name, "s": start, "d": dur})
+    if skipped:
+        warnings.warn(
+            f"{len(skipped)} recording(s) in {audio_dir} had no parseable timestamp "
+            f"(e.g. {skipped[0]}) and will have no click-to-listen; pass recorder= "
+            "or add a convention to dawnchorus.recorders.", stacklevel=2)
+
     dawn = {}
     for d in files:
         y, mo, da = (int(x) for x in d.split("-"))
@@ -66,9 +88,9 @@ def scan_audio(audio_dir, lat, lon, tz):
 
 def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
                min_conf=0.5, file_tz=None, audio_dir=None, audio_base="../data", label_min_conf=0.25,
-               label_analyzer_path=None):
+               label_analyzer_path=None, recorder=None):
     out = dc.run(db_path=db_path, analyzer_path=analyzer_path, latitude=lat, longitude=lon,
-                 tz=tz, min_confidence=min_conf, file_tz=file_tz)
+                 tz=tz, min_confidence=min_conf, file_tz=file_tz, recorder=recorder)
     det, ms = out["detections"], out["morning_summary"]
 
     cfg = DEFAULTS
@@ -125,9 +147,11 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
     label_src = label_analyzer_path or analyzer_path      # labels can come from a denser (higher-overlap) run
     if label_src:
         det_lab = dc.load_birdnet_analyzer(label_src, min_confidence=label_min_conf,
-                                           latitude=lat, longitude=lon, tz=tz, file_tz=file_tz)
+                                           latitude=lat, longitude=lon, tz=tz, file_tz=file_tz,
+                                           recorder=recorder)
     else:
-        det_lab = dc.load_detections(db_path, min_confidence=label_min_conf, latitude=lat, longitude=lon)
+        det_lab = dc.load_detections(db_path, min_confidence=label_min_conf, latitude=lat,
+                                     longitude=lon, recorder=recorder)
     det_lab = dc.SolarModel(lat, lon, tz).annotate(det_lab)
     winlab = det_lab[(det_lab[acol] >= lo) & (det_lab[acol] < hi)]
     label_species = sorted(winlab["common_name"].unique().tolist())
@@ -156,8 +180,10 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
         "earliest": earliest,
         "label_species": label_species,
         "audio_base": audio_base,
+        "recorders": (sorted(str(r) for r in det["recorder"].dropna().unique())
+                      if "recorder" in det.columns else []),
     }
-    audio, dawn = scan_audio(audio_dir, lat, lon, tz) if audio_dir else ({}, {})
+    audio, dawn = scan_audio(audio_dir, lat, lon, tz, recorder) if audio_dir else ({}, {})
     return {"meta": meta, "summary": summary, "counts": counts, "day_keys": day_keys,
             "audio": audio, "dawn": dawn, "clips": clips, "dets": dets_by_day}
 
@@ -221,6 +247,9 @@ def main(argv=None):
     p.add_argument("--lat", type=float, required=True)
     p.add_argument("--lon", type=float, required=True)
     p.add_argument("--tz", required=True)
+    p.add_argument("--recorder", default=None,
+                   help="recorder profile id (see dawnchorus/recorders.py); supplies the filename "
+                        "convention + clock zone and tags the detections")
     p.add_argument("--file-tz", dest="file_tz", default=None)
     p.add_argument("--min-confidence", type=float, default=0.5)
     p.add_argument("--label-min-confidence", dest="label_min_conf", type=float, default=0.25,
@@ -237,7 +266,7 @@ def main(argv=None):
     data = build_data(analyzer_path=args.from_analyzer, db_path=args.db, lat=args.lat,
                       lon=args.lon, tz=args.tz, min_conf=args.min_confidence, file_tz=args.file_tz,
                       audio_dir=args.audio, audio_base=args.audio_base, label_min_conf=args.label_min_conf,
-                      label_analyzer_path=args.label_from_analyzer)
+                      label_analyzer_path=args.label_from_analyzer, recorder=args.recorder)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(data), encoding="utf-8")
@@ -984,6 +1013,26 @@ renderSubline(); renderTiles(); renderFoot(); buildChips(); rebuildPeriods();
 // Static build embeds JSON in #data; the viewer leaves it empty and provides __bootFetch.
 (function(){ const el=document.getElementById("data"), t=el?el.textContent.trim():"";
   if(t){ boot(JSON.parse(t)); } else if(window.__bootFetch){ window.__bootFetch(boot); } })();
+
+// Link back to the local control panel -- but ONLY when one is really there.
+// This same template builds the PUBLIC site, so the link must never appear for visitors:
+// we bail unless the page is on loopback, and then only add it if /api/state answers.
+// (The loopback test comes first so the public site issues no request at all.)
+(function(){
+  const local = ["127.0.0.1","localhost","[::1]"].includes(location.hostname);
+  if(!local) return;
+  const ctl = new AbortController(); setTimeout(()=>ctl.abort(), 1500);
+  fetch("/api/state", {signal: ctl.signal})
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(() => {
+      const hb = document.querySelector(".hbtns"); if(!hb) return;
+      const a = document.createElement("a");
+      a.href = "/"; a.title = "Run models, rebuild, publish";
+      a.innerHTML = '<button class="theme">⚙ Control panel</button>';
+      hb.appendChild(a);
+    })
+    .catch(()=>{});          // served by serve.py or opened as a file: no panel, no link
+})();
 </script>
 </body>
 </html>

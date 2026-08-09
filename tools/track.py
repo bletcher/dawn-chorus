@@ -57,12 +57,21 @@ def diff(audio, manifest):
     return new, changed, gone
 
 
-def infer_week(names):
-    days = []
-    for n in names:
-        m = re.search(r"(\d{8})_\d{6}", n)
-        if m:
-            days.append(date(int(m.group(1)[:4]), int(m.group(1)[4:6]), int(m.group(1)[6:8])))
+def infer_week(names, recorder=None):
+    """BirdNET week-of-year [1..48] from the median recording date; -1 if unknown.
+
+    Parses through the recorder's filename convention (sniffed when not named). A recorder
+    whose names don't match the default pattern would otherwise fall back to -1, which
+    DISABLES BirdNET's location/week species filter — so two boxes at one site would be
+    analysed against different species lists and their results would not be comparable.
+    """
+    from dawnchorus import recorders as rec
+    prof = rec.get(recorder)
+    conv = None
+    if prof is not None:
+        conv = rec.CONVENTIONS_BY_ID.get(prof.resolve(names).convention or "")
+    conv = conv or rec.sniff(names)
+    days = [t.date() for t in (conv.parse(n) for n in names) if t is not None] if conv else []
     if not days:
         return -1
     days.sort()
@@ -121,6 +130,8 @@ def cmd_list(args):
 
 
 def cmd_process(args):
+    import engine                                    # sibling module in tools/
+
     audio = scan(args.audio)
     man = load_manifest(args.manifest)
     new, changed, gone = diff(audio, man)
@@ -131,22 +142,23 @@ def cmd_process(args):
     if not todo:
         print("nothing new to process.")
     else:
-        week = args.week if args.week is not None else infer_week(todo)
-        threads = args.threads or max(2, os.cpu_count() or 4)
-        print(f"[analyze] {len(todo)} recording(s), model {model}, week {week}, capture >= {args.capture_conf}")
-        cmd = [sys.executable, "-m", "birdnet_analyzer.analyze", args.audio, "--output", results,
-               "--lat", str(args.lat), "--lon", str(args.lon), "--week", str(week),
-               "--min_conf", str(args.capture_conf), "--overlap", str(args.overlap),
-               "--sensitivity", str(args.sensitivity), "--rtype", "csv", "--threads", str(threads)]
-        if args.classifier:
-            cmd += ["-c", args.classifier]
-        if not args.reprocess:
-            cmd.append("--skip_existing_results")
-        subprocess.run(cmd, check=True)
+        week = args.week if args.week is not None else infer_week(todo, args.recorder)
+        eng = engine.resolve(args.engine)
+        if args.classifier and eng != "analyzer":
+            sys.exit("--classifier (a custom BirdNET model) needs --engine analyzer")
+        print(f"[analyze] {len(todo)} recording(s), engine {eng}, model {model}, "
+              f"week {week}, capture >= {args.capture_conf}")
+        engine.analyze([Path(args.audio) / n for n in todo], results,
+                       lat=args.lat, lon=args.lon, week=week, min_conf=args.capture_conf,
+                       recorder=args.recorder, overlap=args.overlap,
+                       sensitivity=args.sensitivity, threads=args.threads,
+                       engine=eng, audio_dir=args.audio, reprocess=args.reprocess,
+                       progress=lambda k, n, nm: print(f"  [{k}/{n}] {nm}", flush=True))
         stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         for name in todo:
             csv = result_csv(results, name)
             man.setdefault("files", {})[name] = {**audio[name], "processed_at": stamp, "model": model,
+                                                 "recorder": args.recorder,
                                                  "detections": count_detections(csv) if csv else None}
         man["updated"] = stamp
         Path(args.manifest).write_text(json.dumps(man, indent=2), encoding="utf-8")
@@ -156,7 +168,7 @@ def cmd_process(args):
         print(f"[site] rebuilding {args.out_site} (counting >= {args.min_confidence})")
         data = build_site.build_data(analyzer_path=results, lat=args.lat, lon=args.lon, tz=args.tz,
                                      min_conf=args.min_confidence, file_tz=args.file_tz, audio_dir=args.audio,
-                                     label_min_conf=args.label_min_conf)
+                                     label_min_conf=args.label_min_conf, recorder=args.recorder)
         out = Path(args.out_site)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(build_site.render_html(data), encoding="utf-8")
@@ -214,7 +226,8 @@ def cmd_upload(args):
         if csv:
             try:
                 det = dc.load_birdnet_analyzer(csv, min_confidence=args.upload_min_confidence,
-                                               tz=args.tz, file_tz=args.file_tz)
+                                               tz=args.tz, file_tz=args.file_tz,
+                                               recorder=args.recorder)
                 for r in det.itertuples():
                     d = pd.Timestamp(r.datetime).to_pydatetime()
                     if d.tzinfo is not None:
@@ -249,6 +262,9 @@ def main(argv=None):
     pr.add_argument("--lat", type=float, required=True)
     pr.add_argument("--lon", type=float, required=True)
     pr.add_argument("--tz", required=True)
+    pr.add_argument("--recorder", default=None,
+                    help="recorder profile id (see dawnchorus/recorders.py); tags the detections "
+                         "and supplies the filename convention + clock zone")
     pr.add_argument("--file-tz", dest="file_tz", default=None)
     pr.add_argument("--week", type=int, default=None)
     pr.add_argument("--capture-conf", type=float, default=0.25)
@@ -263,6 +279,9 @@ def main(argv=None):
     pr.add_argument("--manifest", default=None)
     pr.add_argument("--rebuild-site", action="store_true")
     pr.add_argument("--out-site", default="site/dashboard-local.html")
+    pr.add_argument("--engine", default="auto", choices=["auto", "litert", "analyzer"],
+                    help="inference back end: litert (no TensorFlow, default when available) "
+                         "or analyzer (upstream birdnet-analyzer). Both produce identical output.")
     pr.add_argument("--classifier", default=None, help="path to a custom BirdNET classifier (default model if omitted)")
     pr.add_argument("--reprocess", action="store_true", help="re-run every recording, not just new/changed")
 
@@ -272,8 +291,10 @@ def main(argv=None):
     up.add_argument("--api-base", default="http://127.0.0.1:8001")
     up.add_argument("--api-key", default=None, help="site upload key (or env DAWNCHORUS_API_KEY)")
     up.add_argument("--tz", default=None, help="station tz; required only with --file-tz")
+    up.add_argument("--recorder", default=None,
+                    help="recorder profile id; supplies the filename convention + clock zone")
     up.add_argument("--file-tz", dest="file_tz", default=None,
-                    help="tz stamped in filenames if not station-local (e.g. UTC for AudioMoth)")
+                    help="tz stamped in filenames if not station-local; overrides the profile")
     up.add_argument("--upload-min-confidence", dest="upload_min_confidence", type=float, default=0.0,
                     help="floor for uploaded detections; the server filters higher at query time")
     up.add_argument("--results", default=None)

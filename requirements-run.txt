@@ -1,0 +1,38 @@
+# Everything needed to RUN the pipeline locally: recordings -> detections -> dashboard.
+#
+# Deliberately does NOT include TensorFlow. BirdNET's .tflite runs under LiteRT
+# (`ai-edge-litert`), which is ~150 MB against TensorFlow's ~2 GB and produces
+# byte-identical results -- desktop/birdnet_lite.py was validated against
+# BirdNET-Analyzer at 480/480 detections, max delta 0.0002.
+#
+#     py -3.12 -m venv .venv
+#     .venv\Scripts\python -m pip install -r requirements-run.txt
+#     .venv\Scripts\python -m pip install -e .
+#
+# birdnet-analyzer is NOT required. Install it only if you want --engine analyzer
+# (the reference implementation) for cross-checking; it pulls in TensorFlow.
+
+# --- the analysis library's own deps (mirrors pyproject) ---
+astral>=3.2
+pandas>=1.5
+matplotlib>=3.6
+pyyaml>=6.0
+requests>=2.28
+
+# --- inference: BirdNET .tflite without TensorFlow ---
+ai-edge-litert>=1.0
+librosa>=0.10          # kaiser_fast resampling, matching BirdNET-Analyzer's loader
+resampy>=0.4           # REQUIRED: librosa no longer installs it, and without it
+                       # res_type="kaiser_fast" raises. Not interchangeable with the
+                       # soxr default -- kaiser_fast is what the reference uses, and
+                       # the byte-for-byte validation depends on matching it.
+numpy>=1.24
+soundfile>=0.12        # librosa's audio backend on Windows
+
+# --- local web app / API (step C) ---
+fastapi>=0.110
+uvicorn>=0.27
+sqlalchemy>=2.0
+
+# --- tests ---
+pytest>=7.0

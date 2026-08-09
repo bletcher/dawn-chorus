@@ -35,7 +35,52 @@ config, and step-by-step guidance (incl. the batch pipeline and a parts list) is
 
 > **Timezone gotcha (batch path):** AudioMoth stamps filenames in **UTC** by default, while
 > `dawnchorus` treats detection times as station-local. Pass `--file-tz UTC` (with your
-> `--tz`) so onset isn't silently shifted by your whole UTC offset.
+> `--tz`) so onset isn't silently shifted by your whole UTC offset — or just name your
+> recorder with `--recorder audiomoth` and let its profile handle it (below).
+
+## Which recorder: say it, and tag it
+
+A **site** is a place; a **recorder** is the hardware listening there. They are separate
+facts, and conflating them corrupts phenology quietly: mic sensitivity, self-noise, gain
+and sample rate all shift BirdNET's confidence scores, and onset is a quantile of
+detections *above a confidence floor*. Two boxes on the same post will not report the same
+onset minute. So declare the recorder, and every detection gets tagged with it:
+
+```bash
+python tools/publish.py --slug montague --name "North St, Montague, MA" \
+    --from-analyzer data/results --recorder song-meter-micro-2 --unit 2MM43813 \
+    --lat 42.537278 --lon -72.531694 --tz America/New_York
+```
+
+`--recorder` is accepted by `publish.py`, `build_payloads.py`, `build_site.py`,
+`process_cards.py`, `track.py`, and `desktop/app.py` (a dropdown in the GUI). Profiles live
+in [dawnchorus/recorders.py](dawnchorus/recorders.py) and pin down the two things that fail
+silently: the **filename timestamp convention** and the **clock zone**. A profile supplies
+`--file-tz` for you, so a UTC recorder can't be misread by forgetting a flag. Unregistered
+hardware still works — a profile with `convention=None` sniffs the convention from the
+filenames themselves.
+
+The tagging lands in `payload.meta.recorders`, so a published site always states which
+hardware produced its numbers. Old payloads without the field render unchanged.
+
+### Comparing two recorders at one site
+
+Before swapping hardware — or trusting a series that spans a swap — run both boxes side by
+side for a few mornings and measure the gap instead of assuming it away:
+
+```bash
+python tools/compare_recorders.py \
+    --recorder-a song-meter-micro-2 --results-a data/results     --audio-a data \
+    --recorder-b owl-sense          --results-b data_owl/results --audio-b data_owl \
+    --lat 42.537278 --lon -72.531694 --tz America/New_York --out compare/
+```
+
+It checks, in order: **clock agreement** (cross-correlating the two daily activity curves —
+a peak at your whole UTC offset means one box is stamping UTC, the most invisible failure in
+this pipeline), coverage, detections/species/confidence, and finally **onset agreement** per
+(morning, species). That last number is the verdict: if the typical onset disagreement is as
+large as the biological variation you're trying to detect, the two recorders are **not**
+interchangeable and a site's series must not span a swap uncorrected.
 
 ## Why this exists
 
@@ -59,7 +104,83 @@ and `richness_month.csv` (mean species per morning + cumulative pool).
 **Weather** (`--weather`): `morning_weather.csv` (per-morning conditions) and
 `weather_response.csv` (per-species onset~covariate screen).
 
-## Install & run
+## Running the pipeline: card dump -> updated dashboard
+
+The everyday workflow. One-time setup, then one command per card dump:
+
+```powershell
+.\run.ps1 setup        # creates .venv and installs the run stack (~150 MB)
+.\run.ps1 status       # what's configured, what's unprocessed
+.\run.ps1 all          # inference on NEW recordings, then rebuild the dashboards
+.\run.ps1 serve        # http://127.0.0.1:8000/site/
+```
+
+`run.ps1` is a shim over [tools/run.py](tools/run.py) (use that directly on macOS/Linux).
+Everything it needs about your sites lives in
+[deployments.json](deployments.json) — coordinates, timezone, and **which recorder sits in
+which folder** — so you never retype `--lat/--lon/--tz/--recorder`. That is a correctness
+feature, not just convenience: a wrong recorder id silently mis-parses filenames or assumes
+the wrong clock zone, and neither failure raises.
+
+```jsonc
+"montague": {
+  "name": "North St, Montague, MA", "lat": 42.537278, "lon": -72.531694,
+  "tz": "America/New_York", "primary": "sm",
+  "deployments": {
+    "sm":  {"audio": "data",     "recorder": "song-meter-micro-2", "unit": "2MM43813"},
+    "owl": {"audio": "data_owl", "recorder": "owl-sense",          "unit": "e74d3"}
+  }
+}
+```
+
+Processing is **incremental** — a manifest per folder records what's already been analysed,
+so dropping a new card in and re-running only does the new recordings.
+
+**No TensorFlow required.** Inference runs on `ai-edge-litert` (~150 MB) via
+[desktop/birdnet_lite.py](desktop/birdnet_lite.py), validated byte-for-byte against
+BirdNET-Analyzer (480/480 detections, max Δ0.0002). `--engine analyzer` switches to the
+upstream package if you want to cross-check, but that pulls in TensorFlow (~2 GB).
+
+Throughput is about **14× realtime per worker**, and files run in parallel — so ~28× on
+1-hour recordings, i.e. a 3-hour morning in roughly 6 minutes. The pool is sized by **free
+memory, not cores**: resampling to BirdNET's 48 kHz costs ~2.8 GB for a 1-hour recording and
+~5.5 GB for a 2-hour one, so long files get fewer workers, and a worker that runs out is
+retried serially rather than failing the run. Override with `--jobs`.
+
+If you want more speed, `pip install birdnet-analyzer` into `.venv` and pass
+`--engine analyzer`: ~35× realtime, at the cost of a ~2 GB TensorFlow install. Output is
+equivalent either way — verified on 597 real detections, 0 mismatched, max confidence
+delta 0.0009.
+
+Other commands: `.\run.ps1 compare` (two recorders at one site, head to head),
+`.\run.ps1 publish -- --push` (regenerate the public site's JSON and deploy),
+`.\run.ps1 test`.
+
+### The control panel (click a button instead)
+
+```powershell
+.\run.ps1 webapp          # http://127.0.0.1:8765
+```
+
+A card per deployment showing recordings / processed / **new**, with buttons to run the
+model on new recordings, rebuild that dashboard, open it, compare the two recorders, and
+publish. Job output streams into the page as it runs.
+
+It serves the UI, the API, the dashboards **and** the recordings from one local origin, and
+that is not an accident:
+
+* **Inference can't run in the browser.** BirdNET's `.tflite` has an internal `RFFT2D` mel
+  op that loads in tfjs-tflite WASM but aborts at inference. Tested; it's a dead end.
+* **The audio can't be uploaded.** A couple of mornings is several GB, and shipping it
+  would turn a $0 static site into paid compute, storage and egress.
+* **The public site can't drive it.** An HTTPS page cannot call `http://127.0.0.1` —
+  browsers block it as mixed content. So the panel is local, and the public site stays a
+  static publish target that `publish` writes to.
+
+Same origin also means HTTP Range works, so click-to-listen seeks into a recording instead
+of downloading all 165–330 MB of it.
+
+## Install & run (library / CLI only)
 
 ```bash
 pip install -r requirements.txt     # astral, pandas, matplotlib, pyyaml, requests
@@ -292,6 +413,7 @@ Postgres/RDS in production. (The demo `montague` is seeded by `server/seed.py`; 
 dawnchorus/
   io.py          schema-detecting SQLite loader (BirdNET-Pi/Go) -> normalized frame
   analyzer.py    BirdNET-Analyzer result-table loader (batch path) -> same frame
+  recorders.py   recorder profiles: filename conventions + clock zones; per-detection tag
   solar.py       civil-dawn / sunrise anchoring (astral); polar day/night guard
   phenology.py   quantile onset / offset / span / occupancy per species-morning
   seasonal.py    composition drift + richness
@@ -300,7 +422,14 @@ dawnchorus/
   plots.py       reference matplotlib figures
   cli.py         end-to-end runner
 tools/
+  run.py                 THE entry point: status / process / dashboard / compare / publish
+  webapp.py + .html      local control panel (click to run models); serves UI+API+audio
+  config.py              reads deployments.json (sites -> recorders -> audio folders)
+  engine.py              inference back ends: litert (no TensorFlow) or analyzer; same output
   make_synthetic_db.py   demo DB + mock weather cache (temp-driven onset)
+  compare_recorders.py   two boxes, one site: clock check, coverage, species, onset agreement
+  pair_detections.py     event-level pairing for CO-LOCATED boxes: misheard vs not heard
+  audio_profile.py       level / noise floor / per-band response of two co-located recorders
   process_cards.py       one command: recordings -> BirdNET-Analyzer -> dashboard
   build_site.py          local click-to-listen dashboard (dashboard-local.html; needs recordings)
   build_payloads.py      precompute per-site static JSON (site/data/) for the hosted viewer
@@ -314,6 +443,9 @@ server/          OPTIONAL live API — FastAPI + SQLAlchemy over the dawnchorus 
   seed.py          load the current data/results as demo site "montague"
 tests/           pytest suite (unit + end-to-end signal-recovery)
 site/            index.html (public viewer) + data/*.json (payloads) + vendored d3/Plot
+run.ps1          Windows shim over tools/run.py using the project's .venv
+deployments.json sites, their coordinates, and which recorder is in which folder
+requirements-run.txt   the run stack (LiteRT, no TensorFlow)
 ```
 
 MIT. BirdNET model and station software are separate projects by their authors
