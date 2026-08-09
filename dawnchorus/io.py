@@ -88,12 +88,17 @@ def load_detections(
     min_confidence: float = 0.0,
     latitude: float | None = None,
     longitude: float | None = None,
+    recorder: str | None = None,
 ) -> pd.DataFrame:
     """Load a BirdNET SQLite database into a normalized detections frame.
 
     latitude/longitude, if given, override whatever is in the DB (BirdNET-Go
     stores 0.0 when location filtering is disabled, which is unusable for solar
     calculations). If not given, per-row values from the DB are used.
+
+    `recorder` tags every row with the hardware that produced it (a profile id from
+    `dawnchorus.recorders`). A station DB has no such column, so it must be asserted
+    by the caller who knows which box is deployed there.
     """
     db_path = Path(db_path)
     if not db_path.exists():
@@ -128,6 +133,7 @@ def load_detections(
         df["common_name"] = df["scientific_name"]
 
     df["_source_table"] = table
+    df["recorder"] = recorder if recorder is not None else pd.NA
     keep = ["datetime", "date", "scientific_name", "common_name",
-            "confidence", "latitude", "longitude", "_source_table"]
+            "confidence", "latitude", "longitude", "recorder", "_source_table"]
     return df[keep].sort_values("datetime").reset_index(drop=True)

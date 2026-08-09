@@ -20,11 +20,33 @@ from dawnchorus import morning_summary
 from dawnchorus.phenology import DEFAULTS, _anchor_col
 
 
+def _recorder_meta(det: pd.DataFrame) -> list[dict]:
+    """Which recorder(s) produced these detections, and over what span.
+
+    Empty when the source predates recorder tagging — the viewer treats that as one
+    unnamed deployment, so old payloads keep rendering unchanged.
+    """
+    if "recorder" not in det.columns:
+        return []
+    out = []
+    for rid, g in det.dropna(subset=["recorder"]).groupby("recorder"):
+        dates = sorted(str(d) for d in pd.unique(g["date"]))
+        out.append({"id": str(rid), "n": int(len(g)),
+                    "first": dates[0] if dates else None,
+                    "last": dates[-1] if dates else None})
+    return sorted(out, key=lambda r: r["id"])
+
+
 def build_payload(det_all: pd.DataFrame, lat: float, lon: float, tz: str,
                   min_conf: float = 0.5, label_min_conf: float = 0.25,
                   weather: bool = True, weather_cache: str | None = None,
                   weather_source: str = "archive") -> dict:
-    """det_all: columns datetime (naive/aware local), scientific_name, common_name, confidence."""
+    """det_all: columns datetime (naive/aware local), scientific_name, common_name, confidence.
+
+    An optional `recorder` column is carried into `meta.recorders` so a payload always
+    states which hardware produced it. Detectability is hardware-dependent, so a site's
+    numbers are only comparable across time while that list is unchanged.
+    """
     cfg = DEFAULTS
     acol = _anchor_col(cfg["anchor"])                       # min_from_dawn
     lo, hi, bw = cfg["window_start_min"], cfg["window_end_min"], cfg["bin_min"]
@@ -114,6 +136,7 @@ def build_payload(det_all: pd.DataFrame, lat: float, lon: float, tz: str,
         "top_species": [s for s in totals.index if s in heat_set],
         "earliest": earliest,
         "label_species": label_species,
+        "recorders": _recorder_meta(det),
     }
     return {"meta": meta, "summary": summary, "counts": counts, "day_keys": day_keys,
             "dets": dets_by_day, "weather": wx_by_day}

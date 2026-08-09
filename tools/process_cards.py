@@ -27,14 +27,21 @@ from pathlib import Path
 import build_site  # sibling module in tools/
 
 
-def infer_week(audio_dir: str) -> int:
-    """BirdNET week-of-year [1..48] from the median recording date; -1 if unknown."""
-    days = []
-    for p in Path(audio_dir).glob("*.wav"):
-        m = re.search(r"(\d{8})_\d{6}", p.name)
-        if m:
-            y, mo, d = int(m.group(1)[:4]), int(m.group(1)[4:6]), int(m.group(1)[6:8])
-            days.append(date(y, mo, d))
+def infer_week(audio_dir: str, recorder: str | None = None) -> int:
+    """BirdNET week-of-year [1..48] from the median recording date; -1 if unknown.
+
+    Goes through the recorder's filename convention (sniffed when not named), because a
+    -1 fallback silently disables BirdNET's location/week species filter — which makes the
+    run incomparable with one that had a real week.
+    """
+    from dawnchorus import recorders as rec
+    names = [p.name for p in Path(audio_dir).glob("*.wav")]
+    prof = rec.get(recorder)
+    conv = None
+    if prof is not None:
+        conv = rec.CONVENTIONS_BY_ID.get(prof.resolve(names).convention or "")
+    conv = conv or rec.sniff(names)
+    days = [t.date() for t in (conv.parse(n) for n in names) if t is not None] if conv else []
     if not days:
         return -1
     days.sort()
@@ -49,8 +56,11 @@ def main(argv=None):
     p.add_argument("--lat", type=float, required=True)
     p.add_argument("--lon", type=float, required=True)
     p.add_argument("--tz", required=True)
+    p.add_argument("--recorder", default=None,
+                   help="recorder profile id (see dawnchorus/recorders.py); supplies the filename "
+                        "convention + clock zone so you don't have to remember --file-tz")
     p.add_argument("--file-tz", dest="file_tz", default=None,
-                   help="tz the recording filenames are in (e.g. UTC); omit if local")
+                   help="tz the recording filenames are in (e.g. UTC); overrides the profile")
     p.add_argument("--week", type=int, default=None, help="BirdNET week 1..48 (default: inferred)")
     p.add_argument("--capture-conf", type=float, default=0.25)
     p.add_argument("--min-confidence", type=float, default=0.50)
@@ -63,7 +73,7 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     results = args.results or str(Path(args.audio) / "results")
-    week = args.week if args.week is not None else infer_week(args.audio)
+    week = args.week if args.week is not None else infer_week(args.audio, args.recorder)
 
     if not args.skip_analyze:
         import os
@@ -81,7 +91,7 @@ def main(argv=None):
     print(f"[2/2] building dashboard -> {args.out_site}  (counting >= {args.min_confidence})")
     data = build_site.build_data(analyzer_path=results, lat=args.lat, lon=args.lon,
                                  tz=args.tz, min_conf=args.min_confidence, file_tz=args.file_tz,
-                                 audio_dir=args.audio)
+                                 audio_dir=args.audio, recorder=args.recorder)
     out = Path(args.out_site)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(build_site.render_html(data), encoding="utf-8")

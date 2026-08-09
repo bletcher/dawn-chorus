@@ -36,6 +36,9 @@ def main(argv=None):
     p.add_argument("--lat", type=float, required=True)
     p.add_argument("--lon", type=float, required=True)
     p.add_argument("--tz", required=True)
+    p.add_argument("--recorder", default=None,
+                   help="recorder profile id for this site (see dawnchorus/recorders.py)")
+    p.add_argument("--unit", default=None, help="serial of the physical box, e.g. 2MM43813")
     p.add_argument("--file-tz", dest="file_tz", default=None)
     p.add_argument("--min-confidence", type=float, default=0.5)
     p.add_argument("--label-min-confidence", dest="label_min_conf", type=float, default=0.25)
@@ -50,6 +53,10 @@ def main(argv=None):
           "--label-min-confidence", str(args.label_min_conf)]
     if args.file_tz:
         bp += ["--file-tz", args.file_tz]
+    if args.recorder:
+        bp += ["--recorder", args.recorder]
+    if args.unit:
+        bp += ["--unit", args.unit]
     build_payloads.main(bp)
 
     # 2) commit only the site data (nothing else)

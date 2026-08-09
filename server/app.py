@@ -48,6 +48,9 @@ class Site(Base):
     tz: Mapped[str] = mapped_column(String)
     api_key_hash: Mapped[str] = mapped_column(String)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    # The site's default recorder — what a contributor declares when registering a place.
+    # Per-detection `recorder` still wins, so a site can carry more than one box.
+    recorder: Mapped[str] = mapped_column(String, default="")
 
 
 class Detection(Base):
@@ -59,9 +62,32 @@ class Detection(Base):
     common_name: Mapped[str] = mapped_column(String)
     confidence: Mapped[float] = mapped_column(Float)
     model_version: Mapped[str] = mapped_column(String, default="")
+    # Which box heard it. Detectability is hardware-dependent, so pooling two recorders'
+    # detections without this column silently biases onset — see dawnchorus/recorders.py.
+    recorder: Mapped[str] = mapped_column(String, default="", index=True)
 
 
 Base.metadata.create_all(engine)
+
+
+def _add_missing_columns():
+    """Add the `recorder` columns to DBs created before they existed.
+
+    create_all() only creates missing *tables*, so an existing dawnchorus.db would keep its
+    old layout and every SELECT naming `recorder` would fail. This project has no migration
+    tool and the schema change is additive, so a guarded ALTER is the whole story.
+    """
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    with engine.begin() as con:
+        for table in ("sites", "detections"):
+            if not insp.has_table(table):
+                continue
+            if "recorder" not in {c["name"] for c in insp.get_columns(table)}:
+                con.execute(text(f"ALTER TABLE {table} ADD COLUMN recorder VARCHAR DEFAULT ''"))
+
+
+_add_missing_columns()
 
 app = FastAPI(title="dawn-chorus API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -77,6 +103,7 @@ class SiteIn(BaseModel):
     latitude: float
     longitude: float
     tz: str
+    recorder: str = ""          # profile id from dawnchorus.recorders, e.g. "song-meter-micro-2"
 
 
 class DetectionIn(BaseModel):
@@ -84,6 +111,7 @@ class DetectionIn(BaseModel):
     scientific_name: str
     common_name: str
     confidence: float
+    recorder: str | None = None  # falls back to the site's declared recorder
 
 
 @app.post("/sites")
@@ -93,7 +121,8 @@ def create_site(s: SiteIn):
             raise HTTPException(409, "slug already exists")
         key = secrets.token_urlsafe(24)
         db.add(Site(slug=s.slug, name=s.name, latitude=s.latitude, longitude=s.longitude,
-                    tz=s.tz, api_key_hash=_hash(key), created_at=dt.datetime.utcnow()))
+                    tz=s.tz, recorder=s.recorder, api_key_hash=_hash(key),
+                    created_at=dt.datetime.utcnow()))
         db.commit()
         return {"slug": s.slug, "api_key": key}      # shown once — the contributor's upload key
 
@@ -108,6 +137,7 @@ def list_sites():
                                 .where(Detection.site_id == site.id)).first()
             out.append({"slug": site.slug, "name": site.name, "lat": site.latitude,
                         "lon": site.longitude, "tz": site.tz, "n_detections": n,
+                        "recorder": site.recorder or None,
                         "first": str(lo)[:10] if lo else None, "last": str(hi)[:10] if hi else None})
         return out
 
@@ -121,7 +151,8 @@ def upload_detections(slug: str, dets: list[DetectionIn], x_api_key: str = Heade
         if not x_api_key or _hash(x_api_key) != site.api_key_hash:
             raise HTTPException(401, "invalid API key for this site")
         db.add_all([Detection(site_id=site.id, dt=d.dt, scientific_name=d.scientific_name,
-                              common_name=d.common_name, confidence=d.confidence) for d in dets])
+                              common_name=d.common_name, confidence=d.confidence,
+                              recorder=(d.recorder or site.recorder or "")) for d in dets])
         db.commit()
         return {"inserted": len(dets)}
 
@@ -133,8 +164,11 @@ def site_data(slug: str, min_conf: float = 0.5, label_min_conf: float = 0.25):
         if not site:
             raise HTTPException(404, "unknown site")
         rows = db.execute(select(Detection.dt, Detection.scientific_name, Detection.common_name,
-                                 Detection.confidence).where(Detection.site_id == site.id)).all()
+                                 Detection.confidence, Detection.recorder)
+                          .where(Detection.site_id == site.id)).all()
     if not rows:
         raise HTTPException(404, "no detections for this site yet")
-    df = pd.DataFrame(rows, columns=["datetime", "scientific_name", "common_name", "confidence"])
+    df = pd.DataFrame(rows, columns=["datetime", "scientific_name", "common_name",
+                                     "confidence", "recorder"])
+    df["recorder"] = df["recorder"].replace("", pd.NA)
     return build_payload(df, site.latitude, site.longitude, site.tz, min_conf, label_min_conf)

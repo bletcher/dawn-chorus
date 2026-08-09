@@ -8,25 +8,30 @@ from .seasonal import composition, richness
 from .weather import (fetch_hourly, morning_weather, attach_weather,
                       weather_response, DEFAULT_VARS)
 from .ecdf import species_ecdf, ecdf_quantiles, ecdf_distance
+from .recorders import Recorder, REGISTRY as RECORDERS
 
 __all__ = [
     "load_detections", "load_birdnet_analyzer", "SolarModel", "morning_summary",
     "species_phenology", "composition", "richness", "DEFAULTS", "fetch_hourly",
     "morning_weather", "attach_weather", "weather_response", "species_ecdf",
-    "ecdf_quantiles", "ecdf_distance", "run",
+    "ecdf_quantiles", "ecdf_distance", "run", "Recorder", "RECORDERS",
 ]
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 
 def run(db_path=None, latitude=None, longitude=None, tz=None, min_confidence=0.5,
         config=None, weather=False, weather_cache=None, weather_source="archive",
-        analyzer_path=None, file_tz=None):
+        analyzer_path=None, file_tz=None, recorder=None):
     """End-to-end: a detection source -> dict of tidy result frames.
 
     Pass exactly one source: `db_path` (BirdNET-Pi/Go SQLite, the live-station path) or
     `analyzer_path` (a folder/file of BirdNET-Analyzer result tables, the batch path).
     For the batch path, `file_tz` (e.g. "UTC" for AudioMoth) converts filename timestamps
     to the station's `tz`.
+
+    `recorder` names a hardware profile (`dawnchorus.recorders`); it supplies the filename
+    convention and clock zone, and tags every detection so one site can carry more than
+    one box without pooling their biases.
 
     With weather=True, per-morning Open-Meteo covariates are fetched (or read from
     weather_cache) and merged onto morning_summary, and a per-species onset~weather
@@ -36,11 +41,11 @@ def run(db_path=None, latitude=None, longitude=None, tz=None, min_confidence=0.5
         raise ValueError("pass exactly one of db_path or analyzer_path")
     if db_path:
         det = load_detections(db_path, min_confidence=min_confidence,
-                              latitude=latitude, longitude=longitude)
+                              latitude=latitude, longitude=longitude, recorder=recorder)
     else:
         det = load_birdnet_analyzer(analyzer_path, min_confidence=min_confidence,
                                     latitude=latitude, longitude=longitude,
-                                    tz=tz, file_tz=file_tz)
+                                    tz=tz, file_tz=file_tz, recorder=recorder)
     solar = SolarModel(latitude, longitude, tz)
     det = solar.annotate(det)
 

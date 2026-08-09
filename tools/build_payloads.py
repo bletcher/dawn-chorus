@@ -39,8 +39,12 @@ def main(argv=None):
     p.add_argument("--lat", type=float, required=True)
     p.add_argument("--lon", type=float, required=True)
     p.add_argument("--tz", required=True)
+    p.add_argument("--recorder", default=None,
+                   help="recorder profile id for this site (e.g. song-meter-micro-2, owl-sense); "
+                        "supplies the filename convention + clock zone and tags the detections")
+    p.add_argument("--unit", default=None, help="serial of the physical box, e.g. 2MM43813")
     p.add_argument("--file-tz", dest="file_tz", default=None,
-                   help="tz stamped in filenames if not station-local (e.g. UTC for AudioMoth)")
+                   help="tz stamped in filenames if not station-local; overrides the profile")
     p.add_argument("--min-confidence", type=float, default=0.5,
                    help="confidence floor for the charts")
     p.add_argument("--label-min-confidence", dest="label_min_conf", type=float, default=0.25,
@@ -48,8 +52,13 @@ def main(argv=None):
     p.add_argument("--out-dir", default="site/data", help="where to write the JSON (default site/data)")
     args = p.parse_args(argv)
 
+    if args.recorder:
+        from dawnchorus import recorders as rec
+        names = [f.name for f in Path(args.from_analyzer).rglob("*") if f.is_file()]
+        print(rec.describe(args.recorder, names))
     det = dc.load_birdnet_analyzer(args.from_analyzer, min_confidence=0.0, latitude=args.lat,
-                                   longitude=args.lon, tz=args.tz, file_tz=args.file_tz)
+                                   longitude=args.lon, tz=args.tz, file_tz=args.file_tz,
+                                   recorder=args.recorder)
     payload = build_payload(det, args.lat, args.lon, args.tz,
                             args.min_confidence, args.label_min_conf)
 
@@ -61,7 +70,8 @@ def main(argv=None):
     entry = {"slug": args.slug, "name": args.name, "lat": args.lat, "lon": args.lon,
              "tz": args.tz, "n_detections": int(len(det)),
              "first": mornings[0] if mornings else None,
-             "last": mornings[-1] if mornings else None}
+             "last": mornings[-1] if mornings else None,
+             "recorder": args.recorder, "unit": args.unit}
     idx_path = out / "sites.json"
     idx = json.loads(idx_path.read_text(encoding="utf-8")) if idx_path.exists() else []
     idx = [s for s in idx if s.get("slug") != args.slug] + [entry]

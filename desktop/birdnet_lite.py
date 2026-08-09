@@ -55,22 +55,43 @@ def _flat_sigmoid(logits, sensitivity=1.0, bias=1.0):
     return 1.0 / (1.0 + np.exp(-sensitivity * np.clip(logits + transformed_bias, -20, 20)))
 
 
-def _file_start(name):
-    from datetime import datetime
-    m = re.search(TS_REGEX, str(name))
-    return datetime.strptime(m.group(0), TS_FORMAT) if m else None
+def _file_start(name, ts_regex=None, ts_format=None):
+    """Recording start parsed from the filename.
+
+    Defaults to the AudioMoth / Song Meter `YYYYMMDD_HHMMSS` convention. Callers that know
+    the recorder (desktop/app.py resolves a `dawnchorus.recorders` profile) pass that
+    profile's convention instead, so this module stays free of dawnchorus imports and can
+    keep being bundled on its own.
+    """
+    from datetime import datetime, timezone
+    ts_regex = ts_regex or TS_REGEX
+    ts_format = ts_format or TS_FORMAT
+    m = re.search(ts_regex, str(name))
+    if not m:
+        return None
+    if ts_format == "hexepoch":                     # legacy AudioMoth: hex UTC unix epoch
+        try:
+            return datetime.fromtimestamp(int(m.group(0), 16), tz=timezone.utc).replace(tzinfo=None)
+        except (ValueError, OSError, OverflowError):
+            return None
+    try:
+        return datetime.strptime(m.group(0), ts_format)
+    except ValueError:
+        return None
 
 
-def analyze_file(path, interp, labels, min_conf=0.25, overlap=0.0, sensitivity=1.0, allowed=None):
+def analyze_file(path, interp, labels, min_conf=0.25, overlap=0.0, sensitivity=1.0, allowed=None,
+                 ts_regex=None, ts_format=None):
     """Run BirdNET on one recording; return detections with reconstructed wall-clock times.
 
     `allowed` (optional bool mask over the 6522 species from `species_mask`) applies BirdNET's
-    location/week filter, dropping species implausible for the site."""
+    location/week filter, dropping species implausible for the site.
+    `ts_regex`/`ts_format` override the filename timestamp convention for other recorders."""
     sig, _ = librosa.load(path, sr=SAMPLE_RATE, mono=True, res_type="kaiser_fast")
     chunks = split_signal(sig, SAMPLE_RATE, SIG_LENGTH, overlap, 1.0)
     inp = interp.get_input_details()[0]
     out = interp.get_output_details()[0]
-    start = _file_start(path)
+    start = _file_start(path, ts_regex, ts_format)
     step = SIG_LENGTH - overlap
     dets = []
     for i, chunk in enumerate(chunks):
@@ -114,9 +135,10 @@ def species_mask(meta, lat, lon, week, threshold=LOCATION_FILTER_THRESHOLD):
 
 
 def analyze_folder(folder, interp, labels, lat, lon, meta=None, min_conf=0.25,
-                   overlap=0.0, sensitivity=1.0, progress=None):
+                   overlap=0.0, sensitivity=1.0, progress=None, ts_regex=None, ts_format=None):
     """Analyze every .wav in a folder; per-file location filter from its date. Returns a list of
-    detection dicts. `progress(done, total, name)` is called per file if given."""
+    detection dicts. `progress(done, total, name)` is called per file if given.
+    `ts_regex`/`ts_format` override the filename timestamp convention for other recorders."""
     import glob
     import os
     wavs = sorted(set(glob.glob(os.path.join(folder, "*.wav")) + glob.glob(os.path.join(folder, "*.WAV"))))
@@ -124,9 +146,10 @@ def analyze_folder(folder, interp, labels, lat, lon, meta=None, min_conf=0.25,
     for k, wav in enumerate(wavs):
         allowed = None
         if meta is not None:
-            fs = _file_start(os.path.basename(wav))
+            fs = _file_start(os.path.basename(wav), ts_regex, ts_format)
             allowed = species_mask(meta, lat, lon, week_from_date(fs) if fs else -1)
-        rows.extend(analyze_file(wav, interp, labels, min_conf, overlap, sensitivity, allowed))
+        rows.extend(analyze_file(wav, interp, labels, min_conf, overlap, sensitivity, allowed,
+                                 ts_regex, ts_format))
         if progress:
             progress(k + 1, len(wavs), os.path.basename(wav))
     return rows

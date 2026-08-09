@@ -14,12 +14,14 @@ anchoring, phenology, ECDF, weather) is byte-for-byte identical between the two 
 
 Filenames: recorders stamp the start time into the name — AudioMoth `20260517_043000.WAV`,
 Song Meter `PREFIX_20260517_043000.wav`. We pull a `YYYYMMDD_HHMMSS` substring by default;
-override `ts_regex` / `ts_format` for other conventions.
+pass `recorder=` to use a registered profile's convention (see `dawnchorus.recorders`), or
+override `ts_regex` / `ts_format` directly.
 
 TIMEZONE GOTCHA: **AudioMoth stamps filenames in UTC by default.** dawnchorus treats the
 returned `datetime` as station-LOCAL. If your recorder's clock/filenames are in UTC (or any
 tz other than the station's), pass `file_tz=` and `tz=` so we convert — otherwise solar
-time is silently wrong by your whole UTC offset.
+time is silently wrong by your whole UTC offset. A `recorder=` profile supplies `file_tz`
+for you, which is the point of registering one.
 """
 
 from __future__ import annotations
@@ -30,6 +32,8 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+
+from . import recorders as _recorders
 
 # Default AudioMoth / Song Meter timestamp convention embedded in the filename.
 TS_REGEX = r"\d{8}_\d{6}"
@@ -73,6 +77,8 @@ def _file_start(text, ts_regex: str, ts_format: str):
     m = re.search(ts_regex, str(text))
     if not m:
         return None
+    if ts_format == "hexepoch":                    # legacy AudioMoth: hex UTC unix epoch
+        return _recorders.CONVENTIONS_BY_ID["hex-epoch"].parse(m.group(0))
     try:
         return datetime.strptime(m.group(0), ts_format)
     except ValueError:
@@ -86,19 +92,41 @@ def load_birdnet_analyzer(
     longitude: float | None = None,
     tz: str | None = None,
     file_tz: str | None = None,
-    ts_regex: str = TS_REGEX,
-    ts_format: str = TS_FORMAT,
+    ts_regex: str | None = None,
+    ts_format: str | None = None,
+    recorder: str | None = None,
 ) -> pd.DataFrame:
     """Read a directory (or single file) of BirdNET-Analyzer result tables.
 
-    Returns the normalized detections frame (same columns as `load_detections`):
-    datetime, date, scientific_name, common_name, confidence, latitude, longitude.
+    Returns the normalized detections frame (same columns as `load_detections`, plus
+    `recorder`): datetime, date, scientific_name, common_name, confidence, latitude,
+    longitude, recorder.
+
+    `recorder` names a profile in `dawnchorus.recorders` (e.g. "song-meter-micro-2").
+    It supplies the filename convention and the clock zone, and tags every row so two
+    boxes at one site stay distinguishable downstream. Explicit `ts_regex`/`ts_format`/
+    `file_tz` still win over the profile.
 
     `file_tz` (e.g. "UTC" for AudioMoth) plus `tz` (the station tz) convert filename
     timestamps to station-local time. Leave both None if filenames are already local.
     """
+    files = _result_files(results_path)
+
+    # Resolve the recorder profile first: for an unregistered convention it sniffs the
+    # actual result-table names, so an unknown box works without editing the registry.
+    prof = _recorders.get(recorder)
+    if prof is not None:
+        prof = prof.resolve([f.name for f in files])
+        prof_regex, prof_format = prof.timestamp_spec()
+        if file_tz is None:
+            file_tz = prof.file_tz
+    else:
+        prof_regex, prof_format = TS_REGEX, TS_FORMAT
+    ts_regex = ts_regex or prof_regex
+    ts_format = ts_format or prof_format
+
     frames = []
-    for rf in _result_files(results_path):
+    for rf in files:
         sep = "\t" if rf.suffix.lower() in {".txt", ".tsv"} else ","
         try:
             df = pd.read_csv(rf, sep=sep)
@@ -162,7 +190,8 @@ def load_birdnet_analyzer(
     det["latitude"] = latitude if latitude is not None else pd.NA
     det["longitude"] = longitude if longitude is not None else pd.NA
     det["_source_table"] = "birdnet-analyzer"
+    det["recorder"] = prof.id if prof is not None else pd.NA
 
     keep = ["datetime", "date", "scientific_name", "common_name",
-            "confidence", "latitude", "longitude", "_source_table"]
+            "confidence", "latitude", "longitude", "recorder", "_source_table"]
     return det[keep].sort_values("datetime").reset_index(drop=True)
