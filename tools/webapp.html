@@ -7,46 +7,69 @@
 <style>
   :root{
     --bg:#0b0f16; --panel:#121926; --edge:#1e2a3d; --ink:#eef2f8; --dim:#8fa3bf;
-    --accent:#5eead4; --warn:#fbbf24; --bad:#f87171; --ok:#4ade80;
+    --accent:#5eead4; --warn:#fbbf24; --bad:#f87171; --ok:#4ade80; --info:#7dd3fc;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
        font:15px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
   header{padding:22px 28px 14px;border-bottom:1px solid var(--edge)}
-  h1{margin:0;font-size:19px;letter-spacing:.2px}
-  h1 span{color:var(--dim);font-weight:400}
+  h1{margin:0;font-size:19px} h1 span{color:var(--dim);font-weight:400}
   .sub{color:var(--dim);font-size:13px;margin-top:5px}
-  main{padding:22px 28px;max-width:1080px}
-  .cards{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
-  .card{background:var(--panel);border:1px solid var(--edge);border-radius:10px;padding:16px}
+  main{padding:22px 28px;max-width:1200px}
+
+  .card{background:var(--panel);border:1px solid var(--edge);border-radius:10px;
+        padding:16px;margin-bottom:14px}
+  .chead{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap}
   .card h2{margin:0 0 2px;font-size:15px}
-  .card .rec{color:var(--dim);font-size:12px;font-family:var(--mono)}
-  .stats{display:flex;gap:18px;margin:12px 0 6px}
-  .stat b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+  .rec{color:var(--dim);font-size:12px;font-family:var(--mono)}
+  .stats{display:flex;gap:18px}
+  .stat b{display:block;font-size:19px;font-variant-numeric:tabular-nums}
   .stat span{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
-  .new b{color:var(--warn)}
-  .new.zero b{color:var(--dim)}
-  .note{color:var(--dim);font-size:12px;margin:8px 0 0;border-left:2px solid var(--edge);
-        padding-left:9px}
-  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}
+  .new b{color:var(--warn)} .new.zero b{color:var(--dim)}
+  .note{color:var(--dim);font-size:12px;margin:9px 0 0;border-left:2px solid var(--edge);padding-left:9px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:13px}
+
   button{background:#1b2740;color:var(--ink);border:1px solid var(--edge);border-radius:7px;
          padding:7px 13px;font-size:13px;cursor:pointer;font-family:inherit}
   button:hover:not(:disabled){background:#24334f;border-color:#33456b}
   button.primary{background:var(--accent);color:#04231d;border-color:var(--accent);font-weight:600}
-  button.primary:hover:not(:disabled){filter:brightness(1.08)}
+  button.small{padding:4px 9px;font-size:12px}
   button:disabled{opacity:.45;cursor:not-allowed}
   a.btn{text-decoration:none;display:inline-block}
-  .bar{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin:20px 0 10px}
+
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}
+  th{text-align:left;color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase;
+     letter-spacing:.6px;padding:6px 8px;border-bottom:1px solid var(--edge)}
+  td{padding:6px 8px;border-bottom:1px solid #16202f;font-variant-numeric:tabular-nums}
+  tr:hover td{background:#151f2f}
+  td.name{font-family:var(--mono);font-size:12px}
+  td.num{text-align:right}
+  .pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;font-weight:600}
+  .p-processed{background:#12301f;color:var(--ok)}
+  .p-new{background:#3a2c08;color:var(--warn)}
+  .p-changed{background:#3a2c08;color:var(--warn)}
+  .p-missing{background:#3a1414;color:var(--bad)}
+  .p-unparseable{background:#3a1414;color:var(--bad)}
+  .dz{margin-top:12px;border:1.5px dashed var(--edge);border-radius:9px;padding:14px;
+      text-align:center;color:var(--dim);font-size:13px;cursor:pointer}
+  .dz.over{border-color:var(--accent);color:var(--ink);background:#101c22}
+  .prog{height:4px;background:#0a1220;border-radius:99px;overflow:hidden;margin-top:8px;display:none}
+  .prog.on{display:block}
+  .prog i{display:block;height:100%;width:0;background:var(--accent);transition:width .15s}
+
   #log{background:#070a10;border:1px solid var(--edge);border-radius:10px;padding:13px 15px;
        font-family:var(--mono);font-size:12.5px;line-height:1.55;white-space:pre-wrap;
-       min-height:150px;max-height:44vh;overflow:auto;color:#c9d6ea}
+       min-height:120px;max-height:38vh;overflow:auto;color:#c9d6ea}
   .status{font-size:12.5px;color:var(--dim);margin:9px 0 0;font-family:var(--mono)}
   .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px}
   .dot.running{background:var(--warn);animation:p 1s infinite}
   .dot.done{background:var(--ok)} .dot.failed{background:var(--bad)}
   @keyframes p{50%{opacity:.3}}
-  .hint{color:var(--dim);font-size:12px;margin-top:16px}
+  .bar{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin:18px 0 10px}
+  .hint{color:var(--dim);font-size:12px;margin-top:14px}
+  .warnbox{background:#3a2c08;color:#fde68a;border-radius:7px;padding:9px 12px;font-size:12.5px;
+           margin-top:10px;display:none}
 </style>
 </head>
 <body>
@@ -56,7 +79,7 @@
 </header>
 
 <main>
-  <div class="cards" id="cards"></div>
+  <div id="cards"></div>
 
   <div class="bar">
     <button class="primary" data-cmd="all">Process all new + rebuild dashboards</button>
@@ -68,35 +91,92 @@
 
   <div id="log">Ready.</div>
   <div class="status" id="status"></div>
-  <div class="hint">Processing is incremental — only recordings not already in the manifest are analysed.</div>
+  <div class="hint">Runs are incremental — only recordings not already analysed are processed,
+    unless you tick specific files and use <b>Run selected</b>.</div>
 </main>
 
 <script>
 const $ = s => document.querySelector(s);
-let poll = null, seen = 0;
+let poll = null, seen = 0, FILES = {};      // label -> rows
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = (v, s = '') => v === null || v === undefined ? '—' : v + s;
 
 async function state(){
   const s = await (await fetch('/api/state')).json();
   $('#cards').innerHTML = s.deployments.map(d => `
-    <div class="card">
-      <h2>${d.label}</h2>
-      <div class="rec">${d.recorder}${d.unit ? ' · ' + d.unit : ''} · ${d.audio}/</div>
-      <div class="stats">
-        <div class="stat"><b>${d.recordings}</b><span>recordings</span></div>
-        <div class="stat"><b>${d.processed}</b><span>processed</span></div>
-        <div class="stat new ${d.new ? '' : 'zero'}"><b>${d.new}</b><span>new</span></div>
+    <div class="card" data-site="${d.site}" data-dep="${d.key}">
+      <div class="chead">
+        <div>
+          <h2>${esc(d.label)}</h2>
+          <div class="rec">${esc(d.recorder)}${d.unit ? ' · ' + esc(d.unit) : ''} · ${esc(d.audio)}/</div>
+        </div>
+        <div class="stats">
+          <div class="stat"><b>${d.recordings}</b><span>recordings</span></div>
+          <div class="stat"><b>${d.processed}</b><span>analysed</span></div>
+          <div class="stat new ${d.new ? '' : 'zero'}"><b>${d.new}</b><span>to run</span></div>
+        </div>
       </div>
-      ${d.note ? `<p class="note">${d.note}</p>` : ''}
+      ${d.note ? `<p class="note">${esc(d.note)}</p>` : ''}
       <div class="row">
-        <button data-cmd="process" data-site="${d.site}" data-dep="${d.key}"
-          ${d.new ? '' : 'disabled'}>Run model${d.new ? ` (${d.new})` : ''}</button>
+        <button data-cmd="process" data-site="${d.site}" data-dep="${d.key}" ${d.new ? '' : 'disabled'}>
+          Run model on new${d.new ? ` (${d.new})` : ''}</button>
         <button data-cmd="dashboard" data-site="${d.site}" data-dep="${d.key}">Rebuild dashboard</button>
         ${d.dashboard ? `<a class="btn" href="${d.dashboard}" target="_blank"><button>Open ▸</button></a>` : ''}
+        <button class="small toggle" data-site="${d.site}" data-dep="${d.key}">Files ▾</button>
+      </div>
+      <div class="warnbox" id="warn-${d.key}"></div>
+      <div class="files" id="files-${d.key}" hidden></div>
+      <div class="dz" id="dz-${d.key}">Drop .wav recordings here, or click to choose
+        <input type="file" multiple accept=".wav,.WAV" hidden id="in-${d.key}">
+        <div class="prog" id="pr-${d.key}"><i></i></div>
       </div>
     </div>`).join('');
+  for (const d of s.deployments) if (FILES[d.key]) loadFiles(d.site, d.key);
 }
 
-function busy(on){ document.querySelectorAll('button[data-cmd]').forEach(b => b.disabled = on); }
+async function loadFiles(site, dep){
+  const r = await (await fetch(`/api/files?site=${site}&deployment=${dep}`)).json();
+  FILES[dep] = r.files;
+  const box = $(`#files-${dep}`);
+  box.hidden = false;
+  box.innerHTML = `
+    <table>
+      <thead><tr>
+        <th style="width:26px"><input type="checkbox" class="all" data-dep="${dep}"></th>
+        <th>recording</th><th>starts</th><th class="num">min</th><th class="num">MB</th>
+        <th>status</th><th class="num">detections</th><th>analysed</th>
+      </tr></thead>
+      <tbody>${r.files.map(f => `
+        <tr>
+          <td><input type="checkbox" class="pick" data-dep="${dep}" value="${esc(f.name)}"
+              ${f.status === 'missing' || f.status === 'unparseable' ? 'disabled' : ''}></td>
+          <td class="name">${esc(f.name)}</td>
+          <td class="name">${fmt(f.starts)}</td>
+          <td class="num">${fmt(f.minutes)}</td>
+          <td class="num">${fmt(f.mb)}</td>
+          <td><span class="pill p-${f.status}">${f.status}</span></td>
+          <td class="num">${fmt(f.detections)}</td>
+          <td class="name">${fmt(f.processed_at)}</td>
+        </tr>`).join('')}</tbody>
+    </table>
+    <div class="row">
+      <button class="small" data-picknew="${dep}">Select all to-run</button>
+      <button class="small" data-pickclear="${dep}">Clear</button>
+      <button class="small primary" data-runsel="${dep}" data-site="${site}" disabled>Run selected</button>
+    </div>`;
+  syncSel(dep);
+}
+
+function syncSel(dep){
+  const n = document.querySelectorAll(`.pick[data-dep="${dep}"]:checked`).length;
+  const b = document.querySelector(`[data-runsel="${dep}"]`);
+  if (b){ b.disabled = !n; b.textContent = n ? `Run selected (${n})` : 'Run selected'; }
+}
+
+function busy(on){ document.querySelectorAll('button[data-cmd],[data-runsel]').forEach(b => {
+  if (on) b.disabled = true; else if (!b.dataset.runsel) b.disabled = false; });
+  if (!on) Object.keys(FILES).forEach(syncSel); }
 
 async function start(body){
   if (poll) return;
@@ -114,20 +194,115 @@ async function tick(id){
     $('#log').scrollTop = $('#log').scrollHeight;
     seen = j.n;
   }
-  $('#status').innerHTML =
-    `<span class="dot ${j.status}"></span>${j.status} · ${j.elapsed}s` +
-    (j.returncode !== null && j.returncode !== 0 ? ` · exit ${j.returncode}` : '');
-  if (j.status !== 'running'){
-    clearInterval(poll); poll = null; busy(false); state();
-  }
+  $('#status').innerHTML = `<span class="dot ${j.status}"></span>${j.status} · ${j.elapsed}s` +
+    (j.returncode ? ` · exit ${j.returncode}` : '');
+  if (j.status !== 'running'){ clearInterval(poll); poll = null; busy(false); state(); }
 }
 
+// --- uploads: one PUT per file, streamed, with progress ------------------------------
+function upload(site, dep, files){
+  const bar = $(`#pr-${dep}`), fill = bar.querySelector('i'), warn = $(`#warn-${dep}`);
+  const list = [...files].filter(f => /\.wav$/i.test(f.name));
+  if (!list.length) return;
+  bar.classList.add('on');
+  const notes = [];
+  let i = 0;
+  const next = () => {
+    if (i >= list.length){
+      bar.classList.remove('on'); fill.style.width = '0';
+      if (notes.length){ warn.style.display = 'block'; warn.innerHTML = notes.join('<br>'); }
+      state(); loadFiles(site, dep);
+      return;
+    }
+    const f = list[i++];
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', `/api/files/${site}/${dep}/${encodeURIComponent(f.name)}`);
+    xhr.upload.onprogress = e => {
+      const frac = (i - 1 + (e.loaded / e.total)) / list.length;
+      fill.style.width = (frac * 100).toFixed(1) + '%';
+    };
+    xhr.onload = () => {
+      try {
+        const r = JSON.parse(xhr.responseText);
+        if (xhr.status >= 400) notes.push(`✗ ${esc(f.name)}: ${esc(r.detail || xhr.status)}`);
+        else if (r.warning) notes.push(`⚠ ${esc(r.warning)}`);
+      } catch { notes.push(`✗ ${esc(f.name)}: HTTP ${xhr.status}`); }
+      next();
+    };
+    xhr.onerror = () => { notes.push(`✗ ${esc(f.name)}: transfer failed`); next(); };
+    xhr.send(f);
+  };
+  next();
+}
+
+// --- events ---------------------------------------------------------------------------
 document.addEventListener('click', e => {
-  const b = e.target.closest('button[data-cmd]');
-  if (!b || b.disabled) return;
-  start({command:b.dataset.cmd, site:b.dataset.site || null,
-         deployment:b.dataset.dep || null, push:b.dataset.push === '1'});
+  const t = e.target;
+  const cmd = t.closest('button[data-cmd]');
+  if (cmd && !cmd.disabled){
+    return start({command:cmd.dataset.cmd, site:cmd.dataset.site || null,
+                  deployment:cmd.dataset.dep || null, push:cmd.dataset.push === '1'});
+  }
+  const tog = t.closest('.toggle');
+  if (tog){
+    const dep = tog.dataset.dep, box = $(`#files-${dep}`);
+    if (FILES[dep] && !box.hidden){ box.hidden = true; delete FILES[dep]; tog.textContent = 'Files ▾'; }
+    else { loadFiles(tog.dataset.site, dep); tog.textContent = 'Files ▴'; }
+    return;
+  }
+  if (t.dataset.picknew){
+    document.querySelectorAll(`.pick[data-dep="${t.dataset.picknew}"]`).forEach(c => {
+      const s = FILES[t.dataset.picknew].find(f => f.name === c.value);
+      c.checked = !c.disabled && (s.status === 'new' || s.status === 'changed');
+    });
+    return syncSel(t.dataset.picknew);
+  }
+  if (t.dataset.pickclear){
+    document.querySelectorAll(`.pick[data-dep="${t.dataset.pickclear}"]`).forEach(c => c.checked = false);
+    return syncSel(t.dataset.pickclear);
+  }
+  const rs = t.closest('[data-runsel]');
+  if (rs && !rs.disabled){
+    const dep = rs.dataset.runsel;
+    const only = [...document.querySelectorAll(`.pick[data-dep="${dep}"]:checked`)].map(c => c.value);
+    return start({command:'process', site:rs.dataset.site, deployment:dep, only});
+  }
 });
+
+document.addEventListener('change', e => {
+  if (e.target.classList.contains('pick')) syncSel(e.target.dataset.dep);
+  if (e.target.classList.contains('all')){
+    const dep = e.target.dataset.dep;
+    document.querySelectorAll(`.pick[data-dep="${dep}"]`).forEach(c => {
+      if (!c.disabled) c.checked = e.target.checked; });
+    syncSel(dep);
+  }
+  if (e.target.type === 'file' && e.target.id.startsWith('in-')){
+    const dep = e.target.id.slice(3);
+    const card = e.target.closest('.card');
+    upload(card.dataset.site, dep, e.target.files);
+    e.target.value = '';
+  }
+});
+
+document.addEventListener('dragover', e => {
+  const dz = e.target.closest('.dz'); if (!dz) return;
+  e.preventDefault(); dz.classList.add('over');
+});
+document.addEventListener('dragleave', e => {
+  const dz = e.target.closest('.dz'); if (dz) dz.classList.remove('over');
+});
+document.addEventListener('drop', e => {
+  const dz = e.target.closest('.dz'); if (!dz) return;
+  e.preventDefault(); dz.classList.remove('over');
+  const card = dz.closest('.card');
+  upload(card.dataset.site, card.dataset.dep, e.dataTransfer.files);
+});
+document.addEventListener('click', e => {
+  const dz = e.target.closest('.dz');
+  if (dz && e.target.tagName !== 'INPUT') dz.querySelector('input[type=file]').click();
+});
+
 $('#refresh').addEventListener('click', state);
 state();
 </script>

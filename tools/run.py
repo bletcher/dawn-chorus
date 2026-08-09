@@ -69,6 +69,8 @@ def cmd_process(args):
             argv += ["--week", str(args.week)]
         if args.reprocess:
             argv += ["--reprocess"]
+        for n in (getattr(args, "only", None) or []):
+            argv += ["--only", n]
         track.main(argv)
 
 
@@ -156,6 +158,8 @@ def main(argv=None):
         sp.add_argument("--week", type=int, default=None,
                         help="BirdNET week 1-48 (default: inferred from the recording dates)")
         sp.add_argument("--engine", default="auto", choices=["auto", "litert", "analyzer"])
+        sp.add_argument("--only", action="append", default=None, metavar="NAME",
+                        help="process exactly these recordings (repeatable)")
         sp.add_argument("--reprocess", action="store_true", help="redo every recording")
 
     common(sub.add_parser("dashboard", help="rebuild the local click-to-listen pages"))

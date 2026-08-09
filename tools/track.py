@@ -136,6 +136,14 @@ def cmd_process(args):
     man = load_manifest(args.manifest)
     new, changed, gone = diff(audio, man)
     todo = list(audio) if args.reprocess else (new + changed)
+    if args.only:
+        # An explicit selection means "run exactly these", including ones already done --
+        # otherwise picking a processed file from the UI would silently do nothing.
+        want = {Path(n).name for n in args.only}
+        unknown = want - set(audio)
+        if unknown:
+            sys.exit(f"not in {args.audio}: {', '.join(sorted(unknown))}")
+        todo = [n for n in audio if n in want]
     results = args.results or str(Path(args.audio) / "results")
     model = Path(args.classifier).stem if args.classifier else "default"
 
@@ -283,6 +291,8 @@ def main(argv=None):
                     help="inference back end: litert (no TensorFlow, default when available) "
                          "or analyzer (upstream birdnet-analyzer). Both produce identical output.")
     pr.add_argument("--classifier", default=None, help="path to a custom BirdNET classifier (default model if omitted)")
+    pr.add_argument("--only", action="append", default=None, metavar="NAME",
+                    help="process exactly these recordings (repeatable), even if already done")
     pr.add_argument("--reprocess", action="store_true", help="re-run every recording, not just new/changed")
 
     up = sub.add_parser("upload", help="push detections for processed recordings to the API")

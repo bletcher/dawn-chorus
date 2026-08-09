@@ -22,6 +22,7 @@ import subprocess
 import sys
 import threading
 import time
+import wave
 from itertools import count
 from pathlib import Path
 
@@ -31,7 +32,7 @@ for p in (str(HERE), str(ROOT)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from fastapi import FastAPI, HTTPException                       # noqa: E402
+from fastapi import FastAPI, HTTPException, Request              # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse         # noqa: E402
 from fastapi.staticfiles import StaticFiles                      # noqa: E402
 from pydantic import BaseModel                                   # noqa: E402
@@ -51,6 +52,77 @@ class RunIn(BaseModel):
     site: str | None = None
     deployment: str | None = None
     push: bool = False
+    only: list[str] | None = None     # run exactly these recordings
+
+
+def _safe_name(name: str) -> str:
+    """Reject anything that isn't a plain .wav filename.
+
+    Uploads are written straight into a configured audio folder, so a name containing a
+    path separator or `..` would let a request write outside it.
+    """
+    clean = Path(name).name
+    if clean != name or not clean or clean.startswith("."):
+        raise HTTPException(400, f"bad filename {name!r}")
+    if not clean.lower().endswith(".wav"):
+        raise HTTPException(400, "only .wav recordings are accepted")
+    return clean
+
+
+def _file_rows(d) -> list[dict]:
+    """Every recording in a deployment, with whether it has been analysed.
+
+    The `starts` field is parsed with THIS deployment's recorder convention, so a file the
+    pipeline could not place in time shows up here as `unparseable` instead of being
+    silently dropped during a run -- the failure mode that cost us every Owl Sense file.
+    """
+    from dawnchorus import recorders as rec
+
+    audio = track.scan(str(d.audio))
+    manifest = track.load_manifest(str(d.manifest))
+    # NB: diff() takes the WHOLE manifest and unwraps "files" itself. Handing it the inner
+    # dict makes every recording look unprocessed.
+    new, changed, gone = track.diff(audio, manifest)
+    man = manifest.get("files", {})
+    new_s, changed_s = set(new), set(changed)
+
+    prof = rec.get(d.recorder)
+    conv = None
+    if prof is not None:
+        conv = rec.CONVENTIONS_BY_ID.get(prof.resolve(list(audio)).convention or "")
+    conv = conv or rec.sniff(list(audio))
+
+    rows = []
+    for name in sorted(audio):
+        info = man.get(name, {})
+        start = conv.parse(name) if conv else None
+        dur = None
+        try:
+            with wave.open(str(d.audio / name)) as w:
+                dur = round(w.getnframes() / w.getframerate() / 60.0, 1)
+        except Exception:
+            pass
+        if start is None:
+            status = "unparseable"
+        elif name in changed_s:
+            status = "changed"
+        elif name in new_s:
+            status = "new"
+        else:
+            status = "processed"
+        rows.append({
+            "name": name, "status": status,
+            "starts": start.strftime("%Y-%m-%d %H:%M:%S") if start else None,
+            "minutes": dur, "mb": round(audio[name]["size"] / 1e6, 1),
+            "detections": info.get("detections"),
+            "processed_at": (info.get("processed_at") or "")[:16] or None,
+            "recorder": info.get("recorder"),
+        })
+    for name in sorted(set(gone)):
+        rows.append({"name": name, "status": "missing", "starts": None, "minutes": None,
+                     "mb": None, "detections": man.get(name, {}).get("detections"),
+                     "processed_at": None, "recorder": None})
+    return rows
 
 
 def _spawn(cmd_args: list[str]) -> int:
@@ -105,6 +177,62 @@ def state():
     return {"deployments": out}
 
 
+@app.get("/api/files")
+def files(site: str, deployment: str):
+    d = config.deployment(site, deployment)
+    if not d.audio.exists():
+        raise HTTPException(404, f"no folder {d.audio}")
+    return {"deployment": d.label, "recorder": d.recorder, "audio": str(d.audio),
+            "files": _file_rows(d)}
+
+
+@app.put("/api/files/{site}/{deployment}/{name}")
+async def upload(site: str, deployment: str, name: str, request: Request):
+    """Stream one recording into the deployment's folder.
+
+    Raw PUT rather than multipart: these are 165-330 MB files, and streaming the body
+    straight to disk avoids buffering a whole recording in memory (and avoids needing
+    python-multipart). The upload is written to a .part file and renamed only on success,
+    so an interrupted transfer can never look like a complete recording waiting to be run.
+    """
+    d = config.deployment(site, deployment)
+    if not d.audio.exists():
+        raise HTTPException(404, f"no folder {d.audio}")
+    clean = _safe_name(name)
+    dest = d.audio / clean
+    if dest.exists():
+        raise HTTPException(409, f"{clean} already exists")
+
+    tmp = d.audio / f"{clean}.part"
+    total = 0
+    try:
+        with open(tmp, "wb") as f:
+            async for chunk in request.stream():
+                f.write(chunk)
+                total += len(chunk)
+        if total == 0:
+            raise HTTPException(400, "empty upload")
+        tmp.replace(dest)
+    except HTTPException:
+        tmp.unlink(missing_ok=True)
+        raise
+    except Exception as e:
+        tmp.unlink(missing_ok=True)
+        raise HTTPException(500, f"upload failed: {e}") from e
+
+    # Tell the caller straight away whether this name can actually be placed in time.
+    from dawnchorus import recorders as rec
+    prof = rec.get(d.recorder)
+    conv = rec.CONVENTIONS_BY_ID.get(prof.resolve([clean]).convention or "") if prof else None
+    start = conv.parse(clean) if conv else None
+    return {"name": clean, "bytes": total,
+            "starts": start.strftime("%Y-%m-%d %H:%M:%S") if start else None,
+            "warning": None if start else
+                       (f"{clean} carries no timestamp this recorder's convention "
+                        f"({d.recorder}) can read, so it cannot be placed in time and will "
+                        "be skipped by a run.")}
+
+
 @app.post("/api/run")
 def run(r: RunIn):
     if r.command not in {"process", "dashboard", "compare", "publish", "all"}:
@@ -116,6 +244,8 @@ def run(r: RunIn):
         argv += ["--deployment", r.deployment]
     if r.push and r.command == "publish":
         argv += ["--push"]
+    for n in (r.only or []):
+        argv += ["--only", _safe_name(n)]
     return {"job": _spawn(argv)}
 
 
