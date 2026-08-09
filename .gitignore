@@ -5,7 +5,10 @@ __pycache__/
 .eggs/
 build/
 dist/
-.venv*/        # .venv, and malformed variants like .venv.venv/
+# NB: gitignore has no trailing comments -- a '#' mid-line is part of the pattern, not a
+# comment. `.venv*/  # note` therefore matched nothing and let ~10k venv files into
+# `git status`. Keep comments on their own line.
+.venv*/
 venv/
 env/
 .pytest_cache/
@@ -23,8 +26,12 @@ results*/
 # Local processing state (machine-specific mtimes)
 manifest.json
 
-# Local click-to-listen dashboard (needs the recordings; the public site is site/index.html)
-site/dashboard-local.html
+# Recorder-comparison reports (regenerate with `run.ps1 compare`)
+compare/
+
+# Local click-to-listen dashboards (need the recordings; the public site is site/index.html).
+# Glob, not one name: there is one dashboard per recorder when a site runs more than one.
+site/dashboard-*.html
 
 # In-browser BirdNET spike (large model + WASM; experimental)
 _bnet_spike/
