@@ -465,6 +465,21 @@ TEMPLATE = r"""<!doctype html>
     .rail::after{top:2px}
     .chtitle{font-size:18px}
   }
+  /* display:contents by default so the scope bar stays a child of .wrap and its
+     sticky containing block remains the whole page -- wrapping it in a grid would
+     confine the pinning to one row. Only when Listen is actually on screen, and the
+     window is wide enough for both, does this become a real two-column row. */
+  .topline{display:contents}
+  @media (min-width:1180px){
+    .topline:has(#audioCard:not([hidden])){display:grid; align-items:start;
+      grid-template-columns:minmax(0,1fr) minmax(400px,44%); gap:18px; margin-bottom:22px}
+    .topline:has(#audioCard:not([hidden])) > .scopebar{margin-bottom:0; align-self:start}
+    .topline:has(#audioCard:not([hidden])) > .card.audio{margin-bottom:0}
+    /* Pinned together while you are listening: change scope or species and the player
+       stays put. Shorter spectrogram so the pair does not eat the viewport. */
+    .topline:has(#audioCard:not([hidden])) > .card.audio{position:sticky; top:0}
+    .topline:has(#audioCard:not([hidden])) #spec{height:150px}
+  }
   section.card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px 18px 8px; margin-bottom:20px; box-shadow:var(--shadow)}
   .card h2{font-size:19px; margin:0 0 3px; letter-spacing:-.01em}
   .card .lead{color:var(--ink2); font-size:13.5px; margin:0 0 14px; max-width:64ch}
@@ -525,6 +540,7 @@ TEMPLATE = r"""<!doctype html>
 
   <div class="tiles" id="tiles"></div>
 
+  <div class="topline">
   <div class="scopebar">
     <div class="scoperow">
       <span class="eyebrow">Time&nbsp;scope</span>
@@ -580,6 +596,7 @@ TEMPLATE = r"""<!doctype html>
       </label>
     </div>
   </section>
+  </div>
 
   <div class="chapters">
 
