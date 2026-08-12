@@ -51,6 +51,15 @@
   .p-changed{background:#3a2c08;color:var(--warn)}
   .p-missing{background:#3a1414;color:var(--bad)}
   .p-unparseable{background:#3a1414;color:var(--bad)}
+  .p-cued{background:#1b2740;color:var(--info)}
+  .p-running{background:#0b2a33;color:var(--accent)}
+  /* per-row bar: sits under the pill so the status column shows state AND progress */
+  .rowbar{height:3px;background:#0a1220;border-radius:99px;overflow:hidden;margin-top:4px;
+          min-width:74px}
+  .rowbar i{display:block;height:100%;background:var(--accent);transition:width .4s ease}
+  .rowbar.indet i{width:40%;background:linear-gradient(90deg,transparent,var(--accent),transparent);
+                  animation:slide 1.2s linear infinite}
+  tr.active td{background:#101c22}
   .dz{margin-top:12px;border:1.5px dashed var(--edge);border-radius:9px;padding:14px;
       text-align:center;color:var(--dim);font-size:13px;cursor:pointer}
   .dz.over{border-color:var(--accent);color:var(--ink);background:#101c22}
@@ -162,6 +171,7 @@
 const $ = s => document.querySelector(s);
 let poll = null, seen = 0, FILES = {};      // dep -> rows
 let SIG = {}, FRESH = {}, watchTimer = null, rootTouched = false;
+let JOBSEL = {dep: null, names: null};       // what the running job is working through
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt = (v, s = '') => v === null || v === undefined ? '—' : v + s;
@@ -207,7 +217,7 @@ async function state(){
           Run model on new${d.new ? ` (${d.new})` : ''}</button>
         <button data-cmd="dashboard" data-site="${d.site}" data-dep="${d.key}">Rebuild dashboard</button>
         ${d.dashboard ? `<a class="btn" href="${d.dashboard}" target="_blank"><button>Open ▸</button></a>` : ''}
-        <button class="small toggle" data-site="${d.site}" data-dep="${d.key}">Files ▾</button>
+        <button class="small toggle" data-site="${d.site}" data-dep="${d.key}">Files ${FILES[d.key] ? '▴' : '▾'}</button>
       </div>
       <div class="warnbox" id="warn-${d.key}"></div>
       <div class="files" id="files-${d.key}" hidden></div>
@@ -232,14 +242,14 @@ async function loadFiles(site, dep){
         <th>status</th><th class="num">detections</th><th>analysed</th>
       </tr></thead>
       <tbody>${r.files.map(f => `
-        <tr class="${(FRESH[dep] || []).includes(f.name) ? 'fresh' : ''}">
+        <tr data-name="${esc(f.name)}" class="${(FRESH[dep] || []).includes(f.name) ? 'fresh' : ''}">
           <td><input type="checkbox" class="pick" data-dep="${dep}" value="${esc(f.name)}"
               ${f.status === 'missing' || f.status === 'unparseable' ? 'disabled' : ''}></td>
           <td class="name">${esc(f.name)}</td>
           <td class="name">${fmt(f.starts)}</td>
           <td class="num">${fmt(f.minutes)}</td>
           <td class="num">${fmt(f.mb)}</td>
-          <td><span class="pill p-${f.status}">${f.status}</span></td>
+          <td class="st"><span class="pill p-${f.status}">${f.status}</span></td>
           <td class="num">${fmt(f.detections)}</td>
           <td class="name">${fmt(f.processed_at)}</td>
         </tr>`).join('')}</tbody>
@@ -267,8 +277,42 @@ const clock = s => s == null ? '' :
    : s >= 60  ? `${Math.floor(s/60)}m ${Math.round(s%60)}s`
               : `${Math.round(s)}s`);
 
+// Paint per-file state onto the open table: cued -> running (with a bar) -> processed.
+// The client knows the SELECTION it submitted; the server reports which of those are
+// active and which are done, so anything selected but not yet either is cued.
+function paintRows(j){
+  if (!JOBSEL.names) return;
+  const active = new Map((j.active || []).map(a => [a.name, a]));
+  const done = new Set(j.completed || []);
+  document.querySelectorAll(`tr[data-name]`).forEach(tr => {
+    const name = tr.dataset.name, cell = tr.querySelector('td.st');
+    if (!cell || !JOBSEL.names.includes(name)) return;
+    const a = active.get(name);
+    if (a){
+      tr.classList.add('active');
+      const bar = a.pct == null
+        ? '<div class="rowbar indet"><i></i></div>'
+        : `<div class="rowbar"><i style="width:${a.pct}%"></i></div>`;
+      cell.innerHTML = `<span class="pill p-running">running</span>${bar}`;
+    } else if (done.has(name)){
+      tr.classList.remove('active');
+      cell.innerHTML = '<span class="pill p-processed">processed</span>';
+    } else if (j.status === 'running'){
+      tr.classList.remove('active');
+      cell.innerHTML = '<span class="pill p-cued">Cued</span>';
+    }
+  });
+}
+
 async function start(body){
   if (poll) return;
+  JOBSEL = {dep: body.deployment, names: body.only ? [...body.only] : null};
+  if (!JOBSEL.names && body.deployment && FILES[body.deployment]){
+    // A plain "run new" acts on exactly the unprocessed rows, so the table can show
+    // those as cued without the server having to enumerate them.
+    JOBSEL.names = FILES[body.deployment]
+      .filter(f => f.status === 'new' || f.status === 'changed').map(f => f.name);
+  }
   seen = 0; $('#log').textContent = ''; busy(true);
   const bar = $('#jbar') || document.querySelector('.jbar');
   $('#job').hidden = false;
@@ -313,10 +357,11 @@ async function tick(id){
     seen = j.n;
   }
   renderProgress(j);
+  paintRows(j);
   $('#status').innerHTML = `<span class="dot ${j.status}"></span>${j.status} · ${clock(j.elapsed)}` +
     (j.returncode ? ` · exit ${j.returncode}` : '');
   if (j.status !== 'running'){
-    clearInterval(poll); poll = null; busy(false);
+    clearInterval(poll); poll = null; busy(false); JOBSEL = {dep:null, names:null};
     if (j.status === 'done'){ $('#jcur').textContent = 'finished'; document.querySelector('.jbar').className = 'jbar done'; $('#jfill').style.width = '100%'; }
     state();
   }
@@ -430,38 +475,61 @@ document.addEventListener('click', e => {
 // Recordings can land without going through this page (copied from a card in Explorer),
 // so the panel re-scans on a timer and on demand. The scan is a stat per file, not an
 // audio read, so it stays cheap on an external drive.
+// Update the numbers on existing cards WITHOUT rebuilding them. Re-rendering #cards
+// tears down any expanded file table and rebuilds it a moment later, which reads as a
+// flash every 20 seconds -- and the common case for a poll is that nothing changed.
+function updateCounts(deps){
+  for (const d of deps){
+    const card = document.querySelector(`.card[data-site="${d.site}"][data-dep="${d.key}"]`);
+    if (!card) continue;
+    const b = card.querySelectorAll('.stat b');
+    if (b.length >= 3){
+      b[0].textContent = d.recordings; b[1].textContent = d.processed; b[2].textContent = d.new;
+    }
+    const st = card.querySelector('.stat.new');
+    if (st) st.classList.toggle('zero', !d.new);
+    const btn = card.querySelector('button[data-cmd="process"]');
+    if (btn && !poll){
+      btn.disabled = !d.new;
+      btn.textContent = 'Run model on new' + (d.new ? ` (${d.new})` : '');
+    }
+    SIG[d.key] = d.sig;
+  }
+}
+
 async function check(manual){
   if (poll) return;                                  // a job is running; its own refresh follows
   const s = await (await fetch('/api/state')).json();
   renderStorage(s.storage);
-
-  let arrivals = 0;
-  const changed = [];
-  for (const d of s.deployments){
-    if (SIG[d.key] !== undefined && SIG[d.key] !== d.sig){
-      changed.push(d);
-      const before = new Set((FILES[d.key] || []).map(f => f.name));
-      if (FILES[d.key]){
-        const now = await (await fetch(`/api/files?site=${d.site}&deployment=${d.key}`)).json();
-        FRESH[d.key] = now.files.filter(f => !before.has(f.name)).map(f => f.name);
-        arrivals += FRESH[d.key].length;
-      }
-    }
-  }
-  const known = Object.keys(SIG).length > 0;
-  await state();
-  for (const d of s.deployments) if (FILES[d.key]) await loadFiles(d.site, d.key);
-
-  const el = $('#storeMsg');
-  const pending = s.deployments.reduce((a, d) => a + d.new, 0);
-  if (changed.length){
-    flash(el, 'good', arrivals
-      ? `Found ${arrivals} new recording${arrivals === 1 ? '' : 's'} — ${pending} now unprocessed.`
-      : `Folder contents changed — ${pending} unprocessed.`);
-  } else if (manual){
-    flash(el, 'info', known ? `No new recordings. ${pending} unprocessed.` : 'Scanned.');
-  }
   $('#watch').textContent = 'last checked ' + new Date().toLocaleTimeString();
+
+  const known = Object.keys(SIG).length > 0;
+  const changed = s.deployments.filter(d => SIG[d.key] !== undefined && SIG[d.key] !== d.sig);
+  const structural = s.deployments.length !== document.querySelectorAll('.card').length;
+  const pending = s.deployments.reduce((a, d) => a + d.new, 0);
+  const el = $('#storeMsg');
+
+  if (!changed.length && !structural){
+    updateCounts(s.deployments);                     // nothing moved: no DOM teardown
+    if (manual) flash(el, 'info', known ? `No new recordings. ${pending} unprocessed.` : 'Scanned.');
+    return;
+  }
+
+  // Something really did change, so work out what arrived before rebuilding.
+  let arrivals = 0;
+  for (const d of changed){
+    if (!FILES[d.key]) continue;
+    const before = new Set(FILES[d.key].map(f => f.name));
+    const now = await (await fetch(`/api/files?site=${d.site}&deployment=${d.key}`)).json();
+    FRESH[d.key] = now.files.filter(f => !before.has(f.name)).map(f => f.name);
+    arrivals += FRESH[d.key].length;
+  }
+  const open = Object.keys(FILES);
+  await state();
+  for (const d of s.deployments) if (open.includes(d.key)) await loadFiles(d.site, d.key);
+  flash(el, 'good', arrivals
+    ? `Found ${arrivals} new recording${arrivals === 1 ? '' : 's'} — ${pending} now unprocessed.`
+    : `Folder contents changed — ${pending} unprocessed.`);
 }
 
 function startWatching(){

@@ -214,7 +214,7 @@ def _plan_jobs(paths, jobs) -> int:
 
 
 def _litert(paths, out_dir, lat, lon, week, min_conf, recorder, overlap, sensitivity,
-            progress, jobs=0):
+            progress, jobs=0, on_start=None):
     """Run files across a small process pool.
 
     One file at a time is ~12x realtime -- LiteRT's own threading does not saturate the
@@ -240,23 +240,50 @@ def _litert(paths, out_dir, lat, lon, week, min_conf, recorder, overlap, sensiti
 
     written, done, deferred = [], 0, []
     if jobs > 1 and n > 1:
-        from concurrent.futures import ProcessPoolExecutor, as_completed
+        from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
         try:
             with ProcessPoolExecutor(max_workers=jobs, initializer=_init_worker,
                                      initargs=model_files) as ex:
-                futs = {ex.submit(_run_one, t): k for k, t in tasks.items()}
-                for f in as_completed(futs):
-                    try:
-                        csv_path, name, k = f.result()
-                    except MemoryError:
-                        deferred.append(futs[f])
-                        continue
-                    done += 1
-                    if progress:
-                        progress(done, n, f"{name} ({k} detections)")
-                    written.append(Path(csv_path))
+                # Submit only as many as there are workers, topping up on each completion.
+                # Submitting everything up front is simpler but makes "which files are
+                # being analysed right now" unknowable -- and that is exactly what a
+                # per-file progress display needs. Throughput is unchanged: the pool
+                # always has `jobs` tasks in flight.
+                items, fut, pending = iter(tasks.items()), {}, set()
+
+                def _submit_next():
+                    nxt = next(items, None)
+                    if nxt is None:
+                        return False
+                    key, t = nxt
+                    f = ex.submit(_run_one, t)
+                    fut[f] = key
+                    pending.add(f)
+                    if on_start:
+                        on_start(Path(key).name)
+                    return True
+
+                for _ in range(jobs):
+                    if not _submit_next():
+                        break
+                while pending:
+                    finished, _ = wait(pending, return_when=FIRST_COMPLETED)
+                    for f in finished:
+                        pending.discard(f)
+                        key = fut.pop(f)
+                        try:
+                            csv_path, name, k = f.result()
+                        except MemoryError:
+                            deferred.append(key)
+                        else:
+                            done += 1
+                            if progress:
+                                progress(done, n, f"{name} ({k} detections)")
+                            written.append(Path(csv_path))
+                        _submit_next()
         except MemoryError:
-            deferred = [k for k in tasks if k not in {str(w) for w in written}]
+            written_names = {str(w) for w in written}
+            deferred = [k for k in tasks if k not in written_names]
     else:
         deferred = list(tasks)
 
@@ -265,6 +292,8 @@ def _litert(paths, out_dir, lat, lon, week, min_conf, recorder, overlap, sensiti
             progress(done, n, f"retrying {len(deferred)} file(s) serially (low memory)")
         _init_worker(*model_files)
         for key in deferred:
+            if on_start:
+                on_start(Path(key).name)
             csv_path, name, k = _run_one(tasks[key])
             done += 1
             if progress:
@@ -288,7 +317,7 @@ def _analyzer(audio_dir, out_dir, lat, lon, week, min_conf, overlap, sensitivity
 
 def analyze(paths, out_dir, lat, lon, week=None, min_conf=0.25, recorder=None,
             overlap=0.0, sensitivity=1.0, threads=0, progress=None,
-            engine="auto", audio_dir=None, reprocess=False, jobs=0):
+            engine="auto", audio_dir=None, reprocess=False, jobs=0, on_start=None):
     """Run inference over `paths`, writing result tables into `out_dir`.
 
     `week` is BirdNET's 1..48 location filter (None = derive per file, -1 = disabled).
@@ -299,7 +328,7 @@ def analyze(paths, out_dir, lat, lon, week=None, min_conf=0.25, recorder=None,
     paths = [Path(p) for p in paths]
     if eng == "litert":
         return _litert(paths, out_dir, lat, lon, week, min_conf, recorder,
-                       overlap, sensitivity, progress, jobs)
+                       overlap, sensitivity, progress, jobs, on_start)
     if audio_dir is None:
         raise ValueError("engine 'analyzer' needs audio_dir (it scans a folder, not a file list)")
     return _analyzer(audio_dir, out_dir, lat, lon, week, min_conf, overlap, sensitivity,

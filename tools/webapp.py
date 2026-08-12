@@ -157,6 +157,8 @@ def _file_rows(d) -> list[dict]:
 _PROG = re.compile(r"^\s*\[(\d+)/(\d+)\]\s*(.*)$")
 _PHASE = re.compile(r"^=+\s*(.+?)\s*=+$")
 _WORKERS = re.compile(r"(\d+)\s+workers")
+_START = re.compile(r"^\s*\[start\]\s*(\S.*)$")
+_WAVNAME = re.compile(r"^(.*\.wav)", re.I)
 
 
 def _spawn(cmd_args: list[str]) -> int:
@@ -165,7 +167,11 @@ def _spawn(cmd_args: list[str]) -> int:
     job = {"id": jid, "argv": cmd_args, "lines": [], "status": "running",
            "started": time.time(), "finished": None, "returncode": None,
            "phase": None, "done": 0, "total": 0, "current": None, "phase_started": None,
-           "workers": 1}
+           "workers": 1,
+           # Per-file state so the table can show each recording as cued / running / done.
+           "active": {},      # name -> unix time it started
+           "completed": [],   # names completed, in order
+           "durations": []}   # seconds each completed file took, for a per-file estimate
     with _lock:
         _jobs[jid] = job
 
@@ -187,7 +193,12 @@ def _spawn(cmd_args: list[str]) -> int:
                     # A run can cover several deployments; each restarts its own count, so
                     # the bar must reset rather than carry the previous phase's totals.
                     job.update(phase=" ".join(ph.group(1).split()), done=0, total=0,
-                               current=None, phase_started=time.time(), workers=1)
+                               current=None, phase_started=time.time(), workers=1,
+                               active={}, completed=[], durations=[])
+                    continue
+                st = _START.match(line)
+                if st:
+                    job["active"][st.group(1).strip()] = time.time()
                     continue
                 m = _PROG.match(line)
                 if m:
@@ -197,6 +208,15 @@ def _spawn(cmd_args: list[str]) -> int:
                     w = _WORKERS.search(text)
                     if w:
                         job["workers"] = int(w.group(1))
+                    # The progress line is "NAME (n detections)"; the worker-count banner
+                    # is not a filename, so only treat it as one when it looks like a wav.
+                    fn = _WAVNAME.match(text)
+                    if fn:
+                        name = fn.group(1)
+                        began = job["active"].pop(name, None)
+                        if began:
+                            job["durations"].append(time.time() - began)
+                        job["completed"].append(name)
                     job.update(done=done, total=total, current=text or None)
         proc.wait()
         with _lock:
@@ -416,14 +436,22 @@ def job(jid: int, since: int = 0):
         # Files run concurrently, so `done` alone reads as "stuck" for the first whole
         # batch. Report how many are in flight as well, and the bar can show banked work
         # and work-in-progress separately.
-        running = 0
-        if j["status"] == "running" and j["total"]:
-            running = max(0, min(j["workers"], j["total"] - j["done"]))
+        # Per-file estimate: how long completed files took in THIS phase is the only honest
+        # basis for how far along a running one is (BirdNET gives no sub-file progress).
+        # Capped below 100 so a slow file never claims to be finished.
+        typical = (sum(j["durations"]) / len(j["durations"])) if j["durations"] else None
+        now = time.time()
+        active = []
+        for name, began in sorted(j["active"].items(), key=lambda kv: kv[1]):
+            el = now - began
+            active.append({"name": name, "elapsed": round(el, 1),
+                           "pct": round(min(95.0, 100 * el / typical), 1) if typical else None})
         return JSONResponse({
             "id": j["id"], "status": j["status"], "returncode": j["returncode"],
             "elapsed": round((j["finished"] or time.time()) - j["started"], 1),
             "phase": j["phase"], "done": j["done"], "total": j["total"],
-            "current": j["current"], "eta": eta, "workers": j["workers"], "running": running,
+            "current": j["current"], "eta": eta, "workers": j["workers"],
+            "running": len(active), "active": active, "completed": j["completed"],
             "lines": j["lines"][since:], "n": len(j["lines"])})
 
 

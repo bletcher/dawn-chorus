@@ -161,7 +161,8 @@ def cmd_process(args):
                        recorder=args.recorder, overlap=args.overlap,
                        sensitivity=args.sensitivity, threads=args.threads,
                        engine=eng, audio_dir=args.audio, reprocess=args.reprocess,
-                       progress=lambda k, n, nm: print(f"  [{k}/{n}] {nm}", flush=True))
+                       progress=lambda k, n, nm: print(f"  [{k}/{n}] {nm}", flush=True),
+                       on_start=lambda nm: print(f"  [start] {nm}", flush=True))
         stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         for name in todo:
             csv = result_csv(results, name)
