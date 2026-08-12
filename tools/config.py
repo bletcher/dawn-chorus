@@ -52,6 +52,22 @@ class Deployment:
         return f"{self.site}/{self.key}"
 
 
+def _audio_path(raw: str) -> Path:
+    """Resolve a deployment's audio folder.
+
+    Absolute paths are used as given, so recordings can live on a big external drive
+    (`F:/dev/dawn-chorus/data`) while the repo stays on the system disk -- a full card
+    dump is several GB per session. Relative paths stay relative to the repo root, which
+    keeps the default layout working unchanged.
+
+    Everything for a deployment travels together inside this folder: the recordings, the
+    `results/` tables and `manifest.json`. Pointing `audio` somewhere new without moving
+    those makes the deployment look unprocessed and re-runs the whole card.
+    """
+    p = Path(raw).expanduser()
+    return p.resolve() if p.is_absolute() else (ROOT / p).resolve()
+
+
 def load(path: str | Path | None = None) -> dict:
     p = Path(path) if path else CONFIG_PATH
     if not p.exists():
@@ -79,7 +95,7 @@ def deployments(site: str | None = None, key: str | None = None,
             rec.get(d["recorder"])
             out.append(Deployment(
                 site=slug, key=k, name=s["name"], lat=float(s["lat"]), lon=float(s["lon"]),
-                tz=s["tz"], audio=(ROOT / d["audio"]).resolve(), recorder=d["recorder"],
+                tz=s["tz"], audio=_audio_path(d["audio"]), recorder=d["recorder"],
                 unit=d.get("unit"), note=d.get("note", "")))
     if not out:
         raise KeyError(f"no deployment matches site={site!r} key={key!r}. "

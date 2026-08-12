@@ -10,7 +10,12 @@
     "mistyped: a wrong recorder silently mis-parses filenames or shifts every solar time).",
     "Recorder ids must exist in dawnchorus/recorders.py.",
     "",
-    "Audio folders are gitignored; only detections and the site JSON are ever published."
+    "Audio folders are gitignored; only detections and the site JSON are ever published.",
+    "",
+    "`audio` may be an ABSOLUTE path, which is how recordings live on a big external",
+    "drive while the repo stays on the system disk -- a card dump is several GB. Each",
+    "folder carries its own results/ and manifest.json, so a deployment moves as a unit;",
+    "repointing `audio` without moving those makes it look unprocessed and re-runs it all."
   ],
   "sites": {
     "montague": {
@@ -21,13 +26,13 @@
       "primary": "sm",
       "deployments": {
         "sm": {
-          "audio": "data",
+          "audio": "F:/dev/dawn-chorus/data",
           "recorder": "song-meter-micro-2",
           "unit": "2MM43813",
           "note": "Original box. 1-hour files, dawn-relative schedule. Baseline since 2026-07-25."
         },
         "owl": {
-          "audio": "data_owl",
+          "audio": "F:/dev/dawn-chorus/data_owl",
           "recorder": "owl-sense",
           "unit": "e74d3",
           "note": "Trial box, co-located with sm on 2026-08-06/07. 2-hour files. Scores ~0.1 lower confidence than the Song Meter (species-dependent), so its detections are NOT composition-comparable with sm - see tools/compare_recorders.py."

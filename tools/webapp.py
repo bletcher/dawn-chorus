@@ -18,6 +18,10 @@ the progress format we want to stream.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
+import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -36,6 +40,7 @@ from fastapi import FastAPI, HTTPException, Request              # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse         # noqa: E402
 from fastapi.staticfiles import StaticFiles                      # noqa: E402
 from pydantic import BaseModel                                   # noqa: E402
+from starlette.routing import Mount                              # noqa: E402
 
 import config                                                    # noqa: E402
 import track                                                     # noqa: E402
@@ -45,6 +50,30 @@ app = FastAPI(title="dawn-chorus local")
 _jobs: dict[int, dict] = {}
 _ids = count(1)
 _lock = threading.Lock()
+
+# Duration is the only expensive field in a file listing (a header read per recording), and
+# it cannot change for a given path+size. Cache it so polling for new arrivals stays cheap
+# even with a card's worth of files on a spinning external drive.
+_DUR: dict[tuple[str, int], float | None] = {}
+
+
+def _duration_min(path: Path, size: int) -> float | None:
+    key = (str(path), size)
+    if key not in _DUR:
+        try:
+            with wave.open(str(path)) as w:
+                _DUR[key] = round(w.getnframes() / w.getframerate() / 60.0, 1)
+        except Exception:
+            _DUR[key] = None
+    return _DUR[key]
+
+
+def _signature(audio: dict) -> str:
+    """Cheap fingerprint of a folder's contents, for detecting arrivals without a full scan."""
+    h = hashlib.sha1()
+    for name in sorted(audio):
+        h.update(f"{name}:{audio[name]['size']}\n".encode())
+    return h.hexdigest()[:16]
 
 
 class RunIn(BaseModel):
@@ -96,12 +125,7 @@ def _file_rows(d) -> list[dict]:
     for name in sorted(audio):
         info = man.get(name, {})
         start = conv.parse(name) if conv else None
-        dur = None
-        try:
-            with wave.open(str(d.audio / name)) as w:
-                dur = round(w.getnframes() / w.getframerate() / 60.0, 1)
-        except Exception:
-            pass
+        dur = _duration_min(d.audio / name, audio[name]["size"])
         if start is None:
             status = "unparseable"
         elif name in changed_s:
@@ -157,24 +181,123 @@ def _spawn(cmd_args: list[str]) -> int:
 
 @app.get("/api/state")
 def state():
-    """Deployments plus what's unprocessed - the numbers the buttons act on."""
+    """Deployments plus what's unprocessed - the numbers the buttons act on.
+
+    Deliberately cheap (a stat per file, no audio headers) so the page can poll it while
+    open and notice recordings that appeared underneath it -- copied from a card in
+    Explorer, say, rather than uploaded through the panel. `sig` fingerprints the folder
+    so the client can tell "something arrived" from "nothing changed" without re-reading
+    the whole listing.
+    """
     out = []
     for d in config.deployments():
         rec = {"site": d.site, "key": d.key, "label": d.label, "name": d.name,
-               "recorder": d.recorder, "unit": d.unit, "audio": d.audio.name,
-               "note": d.note, "exists": d.audio.exists(),
-               "recordings": 0, "processed": 0, "new": 0, "dashboard": None}
+               "recorder": d.recorder, "unit": d.unit, "audio": str(d.audio),
+               "folder": d.audio.name, "note": d.note, "exists": d.audio.exists(),
+               "recordings": 0, "processed": 0, "new": 0, "sig": "", "dashboard": None}
         if d.audio.exists():
             audio = track.scan(str(d.audio))
             man = track.load_manifest(str(d.manifest))
             new, changed, _ = track.diff(audio, man)
             rec.update(recordings=len(audio), processed=len(man.get("files", {})),
-                       new=len(new) + len(changed))
+                       new=len(new) + len(changed), sig=_signature(audio))
         page = ROOT / "site" / f"dashboard-{d.key}.html"
         if page.exists():
             rec["dashboard"] = f"/site/{page.name}"
         out.append(rec)
-    return {"deployments": out}
+    return {"deployments": out, "storage": _storage()}
+
+
+def _storage() -> dict:
+    """Where recordings live, and whether that drive can take another card."""
+    paths = [d.audio for d in config.deployments()]
+    parents = {p.parent for p in paths}
+    root = str(parents.pop()) if len(parents) == 1 else None
+    info = {"root": root, "shared": root is not None,
+            "free_gb": None, "total_gb": None, "writable": False}
+    probe = Path(root) if root else (paths[0] if paths else None)
+    if probe:
+        try:
+            u = shutil.disk_usage(str(probe if probe.exists() else probe.anchor))
+            info["free_gb"] = round(u.free / 1e9, 1)
+            info["total_gb"] = round(u.total / 1e9, 1)
+        except Exception:
+            pass
+        info["writable"] = os.access(str(probe), os.W_OK) if probe.exists() else False
+    return info
+
+
+class StorageIn(BaseModel):
+    root: str
+
+
+@app.get("/api/storage")
+def storage():
+    return _storage()
+
+
+@app.post("/api/browse")
+def browse():
+    """Open a native folder picker on this machine and return the chosen path.
+
+    Run in a subprocess: a Tk dialog created on a server worker thread is unreliable on
+    Windows, and a wedged dialog would take the whole panel down with it.
+    """
+    code = ("import tkinter as tk;from tkinter import filedialog;"
+            "r=tk.Tk();r.withdraw();r.attributes('-topmost',True);"
+            "print(filedialog.askdirectory(title='Choose the recordings folder') or '')")
+    try:
+        p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                           timeout=180)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(504, "the folder picker was left open") from None
+    chosen = (p.stdout or "").strip().splitlines()
+    return {"path": chosen[-1] if chosen and chosen[-1] else None}
+
+
+@app.post("/api/storage")
+def set_storage(s: StorageIn):
+    """Repoint every deployment at <root>/<its current folder name>.
+
+    This MOVES NOTHING. A deployment's recordings, results/ and manifest.json travel
+    together, so pointing at a location that doesn't already hold them makes the
+    deployment look unprocessed and a run would re-analyse the whole card. We therefore
+    report, per deployment, what is actually present at the new path and let the caller
+    decide -- rather than silently starting a multi-hour re-run.
+    """
+    root = Path(s.root.strip().strip('"')).expanduser()
+    if not root.is_absolute():
+        raise HTTPException(400, "give an absolute path, e.g. F:/dev/dawn-chorus")
+    if not root.exists():
+        raise HTTPException(400, f"{root} does not exist")
+    if not root.is_dir():
+        raise HTTPException(400, f"{root} is not a folder")
+    if not os.access(str(root), os.W_OK):
+        raise HTTPException(400, f"{root} is not writable")
+
+    cfg = json.loads(config.CONFIG_PATH.read_text(encoding="utf-8"))
+    moved, notes = [], []
+    for slug, site in cfg["sites"].items():
+        for key, dep in site.get("deployments", {}).items():
+            old = config._audio_path(dep["audio"])
+            new = root / old.name
+            dep["audio"] = new.as_posix()
+            n_wav = len(list(new.glob("*.wav"))) if new.exists() else 0
+            has_man = (new / "manifest.json").exists()
+            moved.append({"deployment": f"{slug}/{key}", "from": str(old), "to": str(new),
+                          "recordings": n_wav, "manifest": has_man})
+            if not new.exists():
+                notes.append(f"{slug}/{key}: {new} does not exist yet - it will be created "
+                             "on the next upload, but any existing recordings are still at "
+                             f"{old}.")
+            elif n_wav == 0:
+                notes.append(f"{slug}/{key}: {new} holds no recordings.")
+            elif not has_man:
+                notes.append(f"{slug}/{key}: {new} has recordings but no manifest.json, so "
+                             "all of them will count as unprocessed.")
+    config.CONFIG_PATH.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+    _mount_static(remount=True)
+    return {"root": str(root), "deployments": moved, "warnings": notes}
 
 
 @app.get("/api/files")
@@ -265,18 +388,31 @@ def index():
     return (HERE / "webapp.html").read_text(encoding="utf-8")
 
 
-def _mount_static():
+def _mount_static(remount: bool = False):
     """Serve the dashboards and the recordings from this same origin.
 
     StaticFiles honours HTTP Range, which click-to-listen needs: without it every click
     would pull a whole 165-330 MB recording instead of seeking into it.
+
+    Mount names are the FOLDER names, so a dashboard's embedded `../data` URL keeps
+    working after the recordings move to another drive -- only the directory behind the
+    mount changes. `remount` rebuilds them after the storage root is repointed, so the
+    audio does not 404 until the server is restarted.
     """
+    if remount:
+        keep = {"site"}
+        app.router.routes = [r for r in app.router.routes
+                             if not (isinstance(r, Mount) and r.name not in keep
+                                     and r.path != "/site")]
     site = ROOT / "site"
-    if site.exists():
-        app.mount("/site", StaticFiles(directory=str(site)), name="site")
+    if not any(isinstance(r, Mount) and r.path == "/site" for r in app.router.routes):
+        if site.exists():
+            app.mount("/site", StaticFiles(directory=str(site)), name="site")
     for d in config.deployments():
         if d.audio.exists():
-            app.mount(f"/{d.audio.name}", StaticFiles(directory=str(d.audio)), name=d.audio.name)
+            path = f"/{d.audio.name}"
+            if not any(isinstance(r, Mount) and r.path == path for r in app.router.routes):
+                app.mount(path, StaticFiles(directory=str(d.audio)), name=d.audio.name)
 
 
 def main(argv=None):
