@@ -91,6 +91,16 @@
   label.ctl{font-size:13px; color:var(--ink2); display:flex; align-items:center; gap:7px}
   label.ctl.grow{flex:1; min-width:220px}
   select{font:inherit; font-size:13px; padding:5px 8px; border-radius:7px; border:1px solid var(--line); background:var(--surface); color:var(--ink)}
+  /* Segmented control: two mutually exclusive states, so it reads as one control with a
+     current position rather than two independent buttons. */
+  .seg{display:inline-flex; border:1px solid var(--line); border-radius:7px; overflow:hidden;
+    background:var(--surface)}
+  .seg button{font:inherit; font-size:12.5px; padding:5px 10px; border:0; cursor:pointer;
+    background:transparent; color:var(--ink2); white-space:nowrap}
+  .seg button + button{border-left:1px solid var(--line)}
+  .seg button:hover:not([aria-pressed="true"]):not(:disabled){background:var(--scope); color:var(--ink)}
+  .seg button[aria-pressed="true"]{background:var(--accent); color:#fff; font-weight:600}
+  .seg button:disabled{opacity:.4; cursor:not-allowed}
   input[type=range]{flex:1; accent-color:var(--accent); cursor:pointer; min-width:140px}
   input[type=range]:disabled{opacity:.45; cursor:default}
   section.card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px 18px 8px; margin-bottom:20px; box-shadow:var(--shadow)}
@@ -162,6 +172,12 @@
         <option value="month">Monthly</option>
         <option value="year">Yearly</option>
       </select>
+    </label>
+    <label class="ctl">Time axis
+      <span class="seg" id="xmodeSeg" role="group" aria-label="Time axis">
+        <button type="button" data-xmode="dawn" aria-pressed="true">from dawn</button>
+        <button type="button" data-xmode="clock" aria-pressed="false">clock</button>
+      </span>
     </label>
     <label class="ctl grow">Period
       <input type="range" id="periodSlider" min="0" max="0" step="1" value="0" aria-label="Period">
@@ -986,13 +1002,39 @@ document.addEventListener("click", e=>{
 });
 Object.entries(CARDS).forEach(([k,v])=>setCollapsed(k, v, false));
 
+// Clock time needs civil dawn per morning. Payloads generated before that existed have no
+// `dawn` map, so offer the option only when it can actually be honoured -- silently
+// falling back to dawn-relative would look like the toggle was broken.
+const CAN_CLOCK = Object.keys(DAWN).length > 0;
+
+function setXMode(mode){
+  if(mode==="clock" && !CAN_CLOCK) return;
+  SETTINGS.xmode = mode; saveSettings(); applySettings(); renderAll();
+}
+
+// The toolbar control and the Settings dialog drive the SAME state, so both are repainted
+// from SETTINGS rather than from whichever one was clicked.
 function applySettings(){
-  document.querySelectorAll('input[name="xmode"]').forEach(r=>{ r.checked = r.value===SETTINGS.xmode; });
+  document.querySelectorAll('input[name="xmode"]').forEach(r=>{
+    r.checked = r.value===SETTINGS.xmode;
+    if(r.value==="clock" && !CAN_CLOCK) r.disabled = true;
+  });
+  document.querySelectorAll('#xmodeSeg button').forEach(b=>{
+    b.setAttribute("aria-pressed", String(b.dataset.xmode===SETTINGS.xmode));
+    if(b.dataset.xmode==="clock" && !CAN_CLOCK){
+      b.disabled = true;
+      b.title = "Needs civil-dawn times — regenerate this page to enable clock time";
+    }
+  });
   const ac=document.getElementById("autoCollapse"); if(ac) ac.checked = !!SETTINGS.autoCollapse;
 }
+const seg=document.getElementById("xmodeSeg");
+if(seg) seg.addEventListener("click", e=>{
+  const b=e.target.closest("button[data-xmode]");
+  if(b && !b.disabled) setXMode(b.dataset.xmode);
+});
 document.querySelectorAll('input[name="xmode"]').forEach(r=> r.addEventListener("change", ()=>{
-  if(!r.checked) return;
-  SETTINGS.xmode=r.value; saveSettings(); renderAll();
+  if(r.checked) setXMode(r.value);
 }));
 document.getElementById("autoCollapse").addEventListener("change", e=>{
   SETTINGS.autoCollapse=e.target.checked; saveSettings();
