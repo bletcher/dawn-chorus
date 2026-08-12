@@ -124,6 +124,15 @@ def build_payload(det_all: pd.DataFrame, lat: float, lon: float, tz: str,
         except Exception:
             wx_by_day = {}     # no network / no coverage -> charts show "weather not available yet"
 
+    # Civil dawn (seconds past local midnight) per morning. Everything is stored relative
+    # to dawn, so this is what lets a viewer offer a clock-time axis: dawn drifts through
+    # the season, and a fixed offset would misplace every point by up to an hour.
+    dawn_by_day = {}
+    for d in sorted(pd.unique(ms["date"])):
+        dw = model.dawn(d)
+        if dw is not None:
+            dawn_by_day[str(d)] = dw.hour * 3600 + dw.minute * 60 + dw.second
+
     meta = {
         "mornings": sorted(str(d) for d in pd.unique(ms["date"])),
         "days": days,
@@ -139,4 +148,4 @@ def build_payload(det_all: pd.DataFrame, lat: float, lon: float, tz: str,
         "recorders": _recorder_meta(det),
     }
     return {"meta": meta, "summary": summary, "counts": counts, "day_keys": day_keys,
-            "dets": dets_by_day, "weather": wx_by_day}
+            "dets": dets_by_day, "weather": wx_by_day, "dawn": dawn_by_day}

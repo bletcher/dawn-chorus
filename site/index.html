@@ -44,6 +44,19 @@
     border-radius:8px; padding:7px 11px; font-size:13px; cursor:pointer; white-space:nowrap}
   button.theme:hover{border-color:var(--accent); color:var(--ink)}
   .hbtns{display:flex; gap:8px}
+  /* Collapsible cards. The heading is the control, so every card behaves the same way
+     and nothing but the heading survives collapsing. */
+  .card > h2{cursor:pointer; user-select:none; display:flex; align-items:center; gap:9px}
+  .card > h2::before{content:"▾"; font-size:.72em; color:var(--muted); transition:transform .15s;
+    display:inline-block; width:.8em}
+  .card.collapsed > h2::before{transform:rotate(-90deg)}
+  .card.collapsed > *:not(h2){display:none}
+  .card > h2 .why{margin-left:auto; font-size:11px; font-weight:400; color:var(--muted);
+    letter-spacing:.02em}
+  .setrow{display:flex; flex-direction:column; gap:6px; margin:0 0 18px}
+  .setrow > b{font-size:13px}
+  .setrow label{display:flex; gap:8px; align-items:flex-start; font-size:13.5px; cursor:pointer}
+  .setrow small{color:var(--muted); display:block; font-size:12px; line-height:1.45}
   .modal{position:fixed; inset:0; z-index:50; display:flex; align-items:flex-start; justify-content:center;
     padding:44px 16px; background:rgba(9,13,20,.55); overflow:auto}
   .modal[hidden]{display:none}
@@ -132,6 +145,7 @@
     </div>
     <div class="hbtns">
       <button class="theme" id="addBtn" aria-haspopup="dialog">＋ Add data</button>
+      <button class="theme" id="setBtn" aria-haspopup="dialog">⚙ Settings</button>
       <button class="theme" id="guideBtn" aria-haspopup="dialog">Guide</button>
       <button class="theme" id="theme" aria-label="Toggle light or dark theme">◐ Theme</button>
     </div>
@@ -185,7 +199,7 @@
     </div>
   </section>
 
-  <section class="card">
+  <section class="card" data-card="timeline">
     <h2 class="display">Who sings when</h2>
     <p class="lead">Each bar spans a species' vocal activity &mdash; onset (5th percentile of detection
       times) to offset (95th) &mdash; in minutes from <span class="tag">civil dawn</span> (dashed line),
@@ -194,7 +208,7 @@
     <div class="plot" id="chart-timeline"></div>
   </section>
 
-  <section class="card">
+  <section class="card" data-card="ecdf">
     <h2 class="display">Cumulative call distributions</h2>
     <p class="lead">The empirical CDF <em>F(t)</em> &mdash; share of a species' detections that have
       occurred by each minute &mdash; averaged across the period's mornings (each morning a replicate).
@@ -203,14 +217,25 @@
     <div class="plot" id="chart-ecdf"></div>
   </section>
 
-  <section class="card">
+  <section class="card" data-card="heat">
     <h2 class="display">Occupancy across the morning</h2>
     <p class="lead">Species &times; solar-minute. Colour is the fraction of the scoped period's mornings
       a species was detected in each 5-minute bin &mdash; slide the time scope to watch the chorus shift.</p>
     <div class="plot" id="chart-heat"></div>
   </section>
 
-  <section class="card">
+  <section class="card" data-card="season">
+    <h2 class="display">Onset through the season</h2>
+    <p class="lead">Each dot is one species on one morning: when it started, against the date.
+      This is the seasonal question &mdash; <em>does a species shift earlier or later as the year
+      turns?</em> Trend lines appear for species with &ge;4 mornings. Unlike the charts above this
+      one ignores the time scope and always shows <em>every</em> morning, because a season is
+      what it is measuring.</p>
+    <div class="controls"><div class="chips" id="seasonChips"></div></div>
+    <div class="plot" id="chart-season"></div>
+  </section>
+
+  <section class="card" data-card="temp">
     <h2 class="display">Onset vs.&nbsp;temperature</h2>
     <p class="lead">Each dot is a species on one morning: its onset (minutes from <span class="tag">civil
       dawn</span>) against the temperature at dawn &mdash; the founding question, <em>does the chorus start
@@ -219,14 +244,14 @@
     <div class="plot" id="chart-temp"></div>
   </section>
 
-  <section class="card">
+  <section class="card" data-card="rain">
     <h2 class="display">Onset vs.&nbsp;rain</h2>
     <p class="lead">Onset against total rainfall over the morning window (mm). Points sit at 0 on dry
       mornings; a rightward shift on wet mornings would show birds starting later in the rain.</p>
     <div class="plot" id="chart-rain"></div>
   </section>
 
-  <section class="card">
+  <section class="card" data-card="table">
     <h2 class="display">Per-species table</h2>
     <p class="lead">Aggregated over the scoped period: mornings present, total detections, and median
       onset/offset/span/peak/occupancy (minutes from civil dawn).</p>
@@ -234,6 +259,40 @@
   </section>
 
   <footer id="foot"></footer>
+</div>
+
+<div class="modal" id="setModal" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-label="Settings">
+    <button class="close" id="setClose" aria-label="Close">&times;</button>
+    <h2 class="display">Settings</h2>
+
+    <div class="setrow">
+      <b>Time axis</b>
+      <label><input type="radio" name="xmode" value="dawn" checked>
+        <span>Minutes from civil dawn
+          <small>Comparable across the season: dawn drifts by more than an hour between
+            midsummer and autumn, so a fixed clock hides the shift you are looking for.</small></span></label>
+      <label><input type="radio" name="xmode" value="clock">
+        <span>Time of day
+          <small>Wall-clock, using the median civil dawn of the mornings in scope. Easier to
+            match against a recording, but a period spanning weeks is only approximate.</small></span></label>
+    </div>
+
+    <div class="setrow">
+      <b>Cards</b>
+      <label><input type="checkbox" id="autoCollapse" checked>
+        <span>Collapse thin charts automatically
+          <small>Hides a chart when the scoped period gives it fewer than 8 points &mdash;
+            too few to read a relationship from. Opening one yourself always wins.</small></span></label>
+      <div class="row" style="gap:8px; margin-top:4px">
+        <button class="theme" id="expandAll">Expand all</button>
+        <button class="theme" id="collapseAll">Collapse all</button>
+      </div>
+    </div>
+
+    <p class="fine">Settings are remembered in this browser only &mdash; they travel with neither
+      the data nor the published page.</p>
+  </div>
 </div>
 
 <div class="modal" id="guide" hidden>
@@ -604,6 +663,63 @@ function updateScopeLabel(S){ const pkey=periods[Math.min(+slider.value, periods
   document.getElementById("periodLabel").textContent = `${pkey||"—"} · ${S.length} morning${S.length!==1?"s":""}`; }
 
 /* ---- charts (all take the scoped set of mornings S) ---- */
+// ---- settings -------------------------------------------------------------------------
+// Persisted per browser. Kept in one object so adding an option later is a one-line change
+// here plus a control in the Settings dialog, rather than another ad-hoc global.
+const SET_KEY="dc.settings";
+const SETTINGS=Object.assign({xmode:"dawn", autoCollapse:true},
+  (()=>{ try{ return JSON.parse(localStorage.getItem(SET_KEY)||"{}"); }catch(e){ return {}; } })());
+function saveSettings(){ try{ localStorage.setItem(SET_KEY, JSON.stringify(SETTINGS)); }catch(e){} }
+
+// Cards the user has explicitly opened or closed. Auto-collapse must never override a
+// deliberate choice, so it only applies to cards absent from here.
+const CARD_KEY="dc.cards";
+const CARDS=(()=>{ try{ return JSON.parse(localStorage.getItem(CARD_KEY)||"{}"); }catch(e){ return {}; } })();
+function saveCards(){ try{ localStorage.setItem(CARD_KEY, JSON.stringify(CARDS)); }catch(e){} }
+
+function cardEl(key){ return document.querySelector(`.card[data-card="${key}"]`); }
+function setCollapsed(key, on, explicit){
+  const el=cardEl(key); if(!el) return;
+  el.classList.toggle("collapsed", !!on);
+  if(explicit){ CARDS[key]=!!on; saveCards(); }
+}
+// Auto-collapse a chart the scope has left too thin to read. `n` is the number of points
+// the chart would draw, so this follows the aggregation level for free.
+const THIN=8;
+function autoThin(key, n){
+  if(key in CARDS) return;                                   // the user has decided; leave it
+  const el=cardEl(key); if(!el) return;
+  const thin = SETTINGS.autoCollapse && n < THIN;
+  el.classList.toggle("collapsed", thin);
+  const h=el.querySelector("h2"); let why=h && h.querySelector(".why");
+  if(h){ if(thin){ if(!why){ why=document.createElement("span"); why.className="why"; h.appendChild(why); }
+                   why.textContent = n ? `only ${n} point${n===1?"":"s"} in this period` : "no data in this period"; }
+         else if(why) why.remove(); }
+}
+
+// ---- time axis ------------------------------------------------------------------------
+// Everything is stored as minutes from civil dawn. Clock mode shifts by the scope's MEDIAN
+// dawn: dawn moves through the season, so one period can only have one honest offset.
+// (DAWN itself is declared with the audio globals above -- the clip player needs it too.)
+let XOFF = 0;                                                // minutes to add for clock mode
+function setXOffset(S){
+  if(SETTINGS.xmode!=="clock"){ XOFF=0; return; }
+  const secs=S.map(d=>DAWN[d]).filter(v=>v!=null).sort((a,b)=>a-b);
+  XOFF = secs.length ? secs[Math.floor(secs.length/2)]/60 : 0;
+}
+const xv = m => m==null ? null : m + XOFF;                   // datum -> displayed x
+const clockMode = () => SETTINGS.xmode==="clock" && XOFF>0;
+function hhmm(min){ let t=((Math.round(min)%1440)+1440)%1440;
+  return String(Math.floor(t/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0"); }
+function xAxis(extra){
+  const base = clockMode()
+    ? {label:"time of day →", domain:meta.window.map(xv), tickFormat:hhmm}
+    : {label:"minutes from civil dawn →", domain:meta.window};
+  return Object.assign(base, extra||{});
+}
+const xTitle = v => clockMode() ? hhmm(v) : fmt(v,0)+" min";
+function yOnsetLabel(){ return clockMode() ? "onset — time of day ↑" : "onset — min from civil dawn ↑"; }
+
 function aggBySpecies(S){ const set=new Set(S), g={};
   summary.forEach(r=>{ if(set.has(r.date)){ (g[r.name] || (g[r.name]=[])).push(r); } });
   return g; }
@@ -620,16 +736,16 @@ function renderTimeline(S){
   if(!rows.length){ el.innerHTML='<p class="empty">No species cleared the onset threshold in this period.</p>'; return; }
   const names=rows.map(d=>d.name);
   el.append(Plot.plot({ width:W(el), height:names.length*26+80, marginLeft:172, marginRight:26, style:plotStyle(),
-    x:{label:"minutes from civil dawn →", grid:true, domain:meta.window}, y:{domain:names, label:null},
+    x:xAxis({grid:true}), y:{domain:names, label:null},
     color:{type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")], legend:true, label:"median occupancy"},
     marks:[
-      Plot.ruleX([0], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
-      Plot.barX(rows, {x1:"onset", x2:"offset", y:"name", fill:"occ", rx:3, insetTop:5, insetBottom:5}),
-      Plot.tickX(rows, {x:"peak", y:"name", stroke:css("--ink"), strokeWidth:2, strokeOpacity:.85}),
-      Plot.dot(rows, {x:"onset", y:"name", r:3.4, fill:css("--ink"), stroke:css("--surface"), strokeWidth:1}),
-      Plot.text(rows, {x:"offset", y:"name", text:d=>d.n, dx:8, textAnchor:"start", fill:css("--muted"), fontSize:10}),
-      Plot.tip(rows, Plot.pointerY({x:"onset", y:"name",
-        title:d=>`${d.name}\nonset ${fmt(d.onset,0)}  offset ${fmt(d.offset,0)} min\nspan ${fmt(d.offset-d.onset,0)} · occ ${fmt(d.occ,2)}\n${d.n} detections over ${d.mornings} morning(s)`}))
+      Plot.ruleX([xv(0)], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
+      Plot.barX(rows, {x1:d=>xv(d.onset), x2:d=>xv(d.offset), y:"name", fill:"occ", rx:3, insetTop:5, insetBottom:5}),
+      Plot.tickX(rows, {x:d=>xv(d.peak), y:"name", stroke:css("--ink"), strokeWidth:2, strokeOpacity:.85}),
+      Plot.dot(rows, {x:d=>xv(d.onset), y:"name", r:3.4, fill:css("--ink"), stroke:css("--surface"), strokeWidth:1}),
+      Plot.text(rows, {x:d=>xv(d.offset), y:"name", text:d=>d.n, dx:8, textAnchor:"start", fill:css("--muted"), fontSize:10}),
+      Plot.tip(rows, Plot.pointerY({x:d=>xv(d.onset), y:"name",
+        title:d=>`${d.name}\nonset ${xTitle(d.onset)}  offset ${xTitle(d.offset)}\nspan ${fmt(d.offset-d.onset,0)} min · occ ${fmt(d.occ,2)}\n${d.n} detections over ${d.mornings} morning(s)`}))
     ]}));
   wireTimeClicks(el, S);
 }
@@ -649,13 +765,13 @@ function renderEcdf(S){
   if(!lines.length){ el.innerHTML='<p class="empty">No selected species had enough detections in this period.</p>'; return; }
   const shown=[...new Set(lines.map(d=>d.name))];
   el.append(Plot.plot({ width:W(el), height:410, marginLeft:52, marginRight:20, style:plotStyle(),
-    x:{label:"minutes from civil dawn →", grid:true, domain:meta.window},
+    x:xAxis({grid:true}),
     y:{label:"↑ cumulative share of detections", domain:[0,1], ticks:[0,.25,.5,.75,1], grid:true},
     color:{domain:shown, range:shown.map(s=>colorFor[s]), legend:true},
     marks:[
       Plot.ruleY([0.05,0.5,0.95], {stroke:css("--grid")}),
-      Plot.ruleX([0], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
-      Plot.line(lines, {x:"t", y:"F", stroke:"name", strokeWidth:2, tip:true}),
+      Plot.ruleX([xv(0)], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
+      Plot.line(lines, {x:d=>xv(d.t), y:"F", stroke:"name", strokeWidth:2, tip:true}),
     ]}));
   wireTimeClicks(el, S);
 }
@@ -669,39 +785,70 @@ function renderHeat(S){
     let pres=0; for(const di of dIdx){ const a=BDS[di+"|"+si]; if(a && a[bi]>0) pres++; }
     if(pres>0) rows.push({name:names[si], t:GRID[bi], occ:pres/dIdx.length}); }
   el.append(Plot.plot({ width:W(el), height:names.length*20+80, marginLeft:172, marginRight:26, style:plotStyle(),
-    x:{label:"minutes from civil dawn →", domain:meta.window, grid:false}, y:{domain:names, label:null},
+    x:xAxis({grid:false}), y:{domain:names, label:null},
     color:{type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")], legend:true, label:"fraction of the period's mornings singing"},
     marks:[
-      Plot.rect(rows, {x1:d=>d.t-HALF, x2:d=>d.t+HALF, y:"name", fill:"occ", inset:0.5,
-        title:d=>`${d.name}\n${fmt(d.t,0)} min · ${Math.round(d.occ*100)}% of mornings`}),
-      Plot.ruleX([0], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"})
+      Plot.rect(rows, {x1:d=>xv(d.t-HALF), x2:d=>xv(d.t+HALF), y:"name", fill:"occ", inset:0.5,
+        title:d=>`${d.name}\n${xTitle(d.t)} · ${Math.round(d.occ*100)}% of mornings`}),
+      Plot.ruleX([xv(0)], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"})
     ]}));
   wireTimeClicks(el, S);
 }
 
-function renderWeather(S, key, elId, xlabel){
+function renderWeather(S, key, elId, xlabel, card){
   const el=document.getElementById(elId); el.innerHTML="";
   const wx = DATA.weather || {};
   if(!S.some(d=> wx[d] && wx[d][key]!=null)){
+    autoThin(card, 0);
     el.innerHTML='<p class="empty">No weather for this period yet &mdash; it fills in when mornings are generated with a network connection.</p>'; return; }
   const set=new Set(S), pts=[];
   summary.forEach(r=>{ if(!set.has(r.date) || r.onset==null) return;
     const w=wx[r.date]; if(!w || w[key]==null) return;
     pts.push({name:r.name, x:w[key], y:r.onset}); });
+  autoThin(card, pts.length);
   if(!pts.length){ el.innerHTML='<p class="empty">No onsets to compare in this period.</p>'; return; }
   // per-species regression only where a species spans >=4 distinct mornings (else the line is meaningless)
   const xs={}; pts.forEach(p=>{ (xs[p.name]=xs[p.name]||new Set()).add(p.x); });
   const fitPts=pts.filter(p=> xs[p.name].size>=4 && colorFor[p.name]);
   const marks=[
-    Plot.ruleY([0], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
-    Plot.dot(pts, {x:"x", y:"y", fill:d=>colorFor[d.name]||css("--muted"), r:3.6, fillOpacity:.85,
+    Plot.ruleY([xv(0)], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
+    Plot.dot(pts, {x:"x", y:d=>xv(d.y), fill:d=>colorFor[d.name]||css("--muted"), r:3.6, fillOpacity:.85,
       stroke:css("--surface"), strokeWidth:.6, tip:true,
-      title:d=>`${d.name}\n${xlabel}: ${fmt(d.x,1)}\nonset ${fmt(d.y,0)} min from dawn`}),
+      title:d=>`${d.name}\n${xlabel}: ${fmt(d.x,1)}\nonset ${xTitle(d.y)}`}),
   ];
   if(fitPts.length && Plot.linearRegressionY)
-    marks.push(Plot.linearRegressionY(fitPts, {x:"x", y:"y", stroke:d=>colorFor[d.name], z:"name", strokeWidth:1.5, ci:0}));
+    marks.push(Plot.linearRegressionY(fitPts, {x:"x", y:d=>xv(d.y), stroke:d=>colorFor[d.name], z:"name", strokeWidth:1.5, ci:0}));
   el.append(Plot.plot({ width:W(el), height:360, marginLeft:54, marginRight:20, style:plotStyle(),
-    x:{label:xlabel, grid:true}, y:{label:"onset — min from civil dawn ↑", grid:true},
+    x:{label:xlabel, grid:true},
+    y:Object.assign({label:yOnsetLabel(), grid:true}, clockMode()?{tickFormat:hhmm}:{}),
+    marks}));
+}
+
+// Onset against DATE. Deliberately ignores the time scope: a season is the thing being
+// measured, so restricting it to the scoped period would usually leave one or two points.
+function renderSeason(){
+  const el=document.getElementById("chart-season"); el.innerHTML="";
+  const sel=new Set([...document.querySelectorAll(".season-sp:checked")].map(c=>c.value));
+  const pts=[];
+  summary.forEach(r=>{ if(r.onset==null || !sel.has(r.name)) return;
+    pts.push({name:r.name, d:new Date(r.date+"T00:00:00"), date:r.date, y:r.onset, n:r.n}); });
+  autoThin("season", pts.length);
+  if(!pts.length){ el.innerHTML='<p class="empty">No species selected, or none has a defined onset yet.</p>'; return; }
+  const shown=[...new Set(pts.map(p=>p.name))];
+  const days={}; pts.forEach(p=>{ (days[p.name]=days[p.name]||new Set()).add(p.date); });
+  const fitPts=pts.filter(p=> days[p.name].size>=4);
+  const marks=[
+    Plot.ruleY([xv(0)], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
+    Plot.dot(pts, {x:"d", y:d=>xv(d.y), fill:"name", r:3.6, fillOpacity:.85,
+      stroke:css("--surface"), strokeWidth:.6, tip:true,
+      title:d=>`${d.name}\n${d.date}\nonset ${xTitle(d.y)}\n${d.n} detections`}),
+  ];
+  if(fitPts.length && Plot.linearRegressionY)
+    marks.push(Plot.linearRegressionY(fitPts, {x:"d", y:d=>xv(d.y), stroke:"name", z:"name", strokeWidth:1.5, ci:0}));
+  el.append(Plot.plot({ width:W(el), height:420, marginLeft:56, marginRight:20, style:plotStyle(),
+    x:{label:"morning →", grid:true, type:"time"},
+    y:Object.assign({label:yOnsetLabel(), grid:true}, clockMode()?{tickFormat:hhmm}:{}),
+    color:{domain:shown, range:shown.map(s=>colorFor[s]||css("--muted")), legend:true},
     marks}));
 }
 
@@ -730,19 +877,58 @@ function renderFoot(){ document.getElementById("foot").innerHTML =
   `<a href="https://observablehq.com/plot/" target="_blank" rel="noopener">Observable&nbsp;Plot</a> (library, vendored). `+
   `Regenerate with <code>tools/build_site.py</code> as new mornings arrive.`; }
 
-function buildChips(){
-  const chips=document.getElementById("ecdfChips");
+function chipRow(elId, cls, onChange){
+  const chips=document.getElementById(elId);
   const order=meta.top_species.filter(s=>meta.species.includes(s));
   const on=new Set(order.slice(0,5));
-  chips.innerHTML=order.map(s=>`<label class="chip${on.has(s)?" on":""}"><input class="ecdf-sp" type="checkbox" value="${s}"${on.has(s)?" checked":""}>${s}</label>`).join("");
-  chips.addEventListener("change", e=>{ e.target.closest(".chip").classList.toggle("on", e.target.checked); renderEcdf(scopedDays()); });
+  chips.innerHTML=order.map(s=>`<label class="chip${on.has(s)?" on":""}"><input class="${cls}" type="checkbox" value="${s}"${on.has(s)?" checked":""}>${s}</label>`).join("");
+  chips.addEventListener("change", e=>{ e.target.closest(".chip").classList.toggle("on", e.target.checked); onChange(); });
+}
+function buildChips(){
+  chipRow("ecdfChips", "ecdf-sp", ()=>renderEcdf(scopedDays()));
+  chipRow("seasonChips", "season-sp", renderSeason);
 }
 
 function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S);
-  renderTimeline(S); renderEcdf(S); renderHeat(S);
-  renderWeather(S,"t","chart-temp","temperature at dawn (°C)");
-  renderWeather(S,"r","chart-rain","rain over the window (mm)");
+  setXOffset(S);
+  renderTimeline(S); renderEcdf(S); renderHeat(S); renderSeason();
+  renderWeather(S,"t","chart-temp","temperature at dawn (°C)","temp");
+  renderWeather(S,"r","chart-rain","rain over the window (mm)","rain");
   renderTable(S); updateAudioCard(S); }
+
+// ---- card collapsing + settings ---------------------------------------------------------
+// Cards render into a hidden element as 0-wide, so anything opened has to be redrawn.
+document.addEventListener("click", e=>{
+  const h=e.target.closest(".card > h2"); if(!h) return;
+  const card=h.parentElement, key=card.dataset.card; if(!key) return;
+  const nowCollapsed=!card.classList.contains("collapsed");
+  setCollapsed(key, nowCollapsed, true);
+  const why=h.querySelector(".why"); if(why && !nowCollapsed) why.remove();
+  if(!nowCollapsed) renderAll();
+});
+Object.entries(CARDS).forEach(([k,v])=>setCollapsed(k, v, false));
+
+function applySettings(){
+  document.querySelectorAll('input[name="xmode"]').forEach(r=>{ r.checked = r.value===SETTINGS.xmode; });
+  const ac=document.getElementById("autoCollapse"); if(ac) ac.checked = !!SETTINGS.autoCollapse;
+}
+document.querySelectorAll('input[name="xmode"]').forEach(r=> r.addEventListener("change", ()=>{
+  if(!r.checked) return;
+  SETTINGS.xmode=r.value; saveSettings(); renderAll();
+}));
+document.getElementById("autoCollapse").addEventListener("change", e=>{
+  SETTINGS.autoCollapse=e.target.checked; saveSettings();
+  if(!SETTINGS.autoCollapse)                      // turning it off re-opens what it hid
+    document.querySelectorAll(".card[data-card]").forEach(c=>{
+      if(!(c.dataset.card in CARDS)) c.classList.remove("collapsed"); });
+  renderAll();
+});
+document.getElementById("expandAll").addEventListener("click", ()=>{
+  document.querySelectorAll(".card[data-card]").forEach(c=>setCollapsed(c.dataset.card, false, true));
+  renderAll(); });
+document.getElementById("collapseAll").addEventListener("click", ()=>{
+  document.querySelectorAll(".card[data-card]").forEach(c=>setCollapsed(c.dataset.card, true, true)); });
+applySettings();
 
 aggSel.onchange = rebuildPeriods;
 slider.oninput = renderAll;
@@ -770,7 +956,8 @@ document.getElementById("theme").onclick = ()=>{ const curTheme=root.getAttribut
     const c=m.querySelector(".close"); if(c) c.onclick=()=>{ m.hidden=true; };
     m.addEventListener("click", e=>{ if(e.target===m) m.hidden=true; });   // backdrop closes
     return m; }
-  const modals=[wire("guide","guideBtn"), wire("addModal","addBtn")].filter(Boolean);
+  const modals=[wire("guide","guideBtn"), wire("addModal","addBtn"),
+                wire("setModal","setBtn")].filter(Boolean);
   addEventListener("keydown", e=>{ if(e.key==="Escape") modals.forEach(m=>m.hidden=true); });
   document.querySelectorAll("#addModal pre").forEach(pre=>{           // copy-to-clipboard on commands
     const b=document.createElement("button"); b.type="button"; b.className="copybtn"; b.textContent="Copy";
