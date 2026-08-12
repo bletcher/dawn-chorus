@@ -30,11 +30,30 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      # Cache policy has to differ by what actually changes. A single max-age=3600 over
+      # everything meant a fresh publish stayed invisible in the browser for up to an
+      # hour: invalidating CloudFront clears the EDGE, not a visitor's own cache.
+      # index.html and data/*.json change on every publish, so they must revalidate;
+      # the vendored d3/Plot bundles are byte-identical between publishes, so they get
+      # a long cache and cost nothing to keep.
       - name: Sync site/ to S3 under /dawn-chorus
         run: |
           aws s3 sync site/ "s3://${{ secrets.S3_BUCKET }}/dawn-chorus/" \
             --delete \
-            --cache-control "max-age=3600"
+            --cache-control "public, max-age=60, must-revalidate"
+
+      - name: Let the vendored libraries cache hard
+        run: |
+          # Metadata-only rewrite AFTER the mirror, so the sync above stays the single
+          # authority on what exists -- mixing --delete with include/exclude filters is
+          # where you accidentally wipe half a site.
+          if aws s3 ls "s3://${{ secrets.S3_BUCKET }}/dawn-chorus/vendor/" > /dev/null 2>&1; then
+            aws s3 cp \
+              "s3://${{ secrets.S3_BUCKET }}/dawn-chorus/vendor/" \
+              "s3://${{ secrets.S3_BUCKET }}/dawn-chorus/vendor/" \
+              --recursive --metadata-directive REPLACE \
+              --cache-control "public, max-age=604800, immutable"
+          fi
 
       - name: Invalidate CloudFront cache
         env:
