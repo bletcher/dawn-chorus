@@ -316,13 +316,34 @@
 
 <script>
 window.__bootFetch = async function(boot){
-  const BASE = "./data", MODE = "static";                        // static JSON files, or a live API
+  const RAW = "./data", MODE = "static";                         // static JSON files, or a live API
+
+  // Resolve a RELATIVE data base against the document's DIRECTORY, not against whatever
+  // the browser guesses. Visiting the site without a trailing slash (/dawn-chorus rather
+  // than /dawn-chorus/) makes "./data/sites.json" resolve to /data/sites.json, one level
+  // too high, and every fetch 404s -- the page loads but shows no data at all.
+  const docDir = (function(){
+    const p = location.pathname;
+    if (p.endsWith("/")) return p;
+    const last = p.slice(p.lastIndexOf("/") + 1);
+    // A final segment with a dot is a file (index.html); without one it's a directory
+    // the server did not redirect to its canonical trailing-slash form.
+    return last.includes(".") ? p.slice(0, p.lastIndexOf("/") + 1) : p + "/";
+  })();
+  const isAbsolute = /^(https?:)?\/\//.test(RAW) || RAW.startsWith("/");
+  const BASE = (MODE === "api" || isAbsolute) ? RAW
+    : new URL(RAW.replace(/^\.\//, ""), location.origin + docDir).href.replace(/\/+$/, "");
+
   const listUrl = MODE === "api" ? BASE + "/sites" : BASE + "/sites.json";
   const dataUrl = s => MODE === "api" ? BASE + "/sites/" + encodeURIComponent(s) + "/data"
                                       : BASE + "/" + encodeURIComponent(s) + ".json";
   const sub = document.getElementById("subline");
   let sites;
-  try { sites = await (await fetch(listUrl)).json(); }
+  try {
+    const r = await fetch(listUrl);
+    if (!r.ok) throw new Error(r.status);
+    sites = await r.json();
+  }
   catch (e) { sub.textContent = "Can't load the site list (" + listUrl + ")"; return; }
   const slug = new URLSearchParams(location.search).get("site") || (sites[0] && sites[0].slug);
   const sel = document.createElement("select");
@@ -766,6 +787,26 @@ renderSubline(); renderTiles(); renderFoot(); buildChips(); rebuildPeriods();
 // Static build embeds JSON in #data; the viewer leaves it empty and provides __bootFetch.
 (function(){ const el=document.getElementById("data"), t=el?el.textContent.trim():"";
   if(t){ boot(JSON.parse(t)); } else if(window.__bootFetch){ window.__bootFetch(boot); } })();
+
+// Link back to the local control panel -- but ONLY when one is really there.
+// This same template builds the PUBLIC site, so the link must never appear for visitors:
+// we bail unless the page is on loopback, and then only add it if /api/state answers.
+// (The loopback test comes first so the public site issues no request at all.)
+(function(){
+  const local = ["127.0.0.1","localhost","[::1]"].includes(location.hostname);
+  if(!local) return;
+  const ctl = new AbortController(); setTimeout(()=>ctl.abort(), 1500);
+  fetch("/api/state", {signal: ctl.signal})
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(() => {
+      const hb = document.querySelector(".hbtns"); if(!hb) return;
+      const a = document.createElement("a");
+      a.href = "/"; a.title = "Run models, rebuild, publish";
+      a.innerHTML = '<button class="theme">⚙ Control panel</button>';
+      hb.appendChild(a);
+    })
+    .catch(()=>{});          // served by serve.py or opened as a file: no panel, no link
+})();
 </script>
 </body>
 </html>

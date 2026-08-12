@@ -195,15 +195,38 @@ def render_html(data: dict) -> str:
 
 # Injected into viewer.html in place of embedded data: fetch the site list + the selected
 # site's payload from the API, add a site picker to the masthead, then boot() on it.
-VIEWER_BOOTSTRAP = """<script>
+# RAW string: this is JavaScript, and its regexes contain backslash escapes that Python
+# would otherwise try (and fail) to interpret.
+VIEWER_BOOTSTRAP = r"""<script>
 window.__bootFetch = async function(boot){
-  const BASE = %BASE%, MODE = %MODE%;                        // static JSON files, or a live API
+  const RAW = %BASE%, MODE = %MODE%;                         // static JSON files, or a live API
+
+  // Resolve a RELATIVE data base against the document's DIRECTORY, not against whatever
+  // the browser guesses. Visiting the site without a trailing slash (/dawn-chorus rather
+  // than /dawn-chorus/) makes "./data/sites.json" resolve to /data/sites.json, one level
+  // too high, and every fetch 404s -- the page loads but shows no data at all.
+  const docDir = (function(){
+    const p = location.pathname;
+    if (p.endsWith("/")) return p;
+    const last = p.slice(p.lastIndexOf("/") + 1);
+    // A final segment with a dot is a file (index.html); without one it's a directory
+    // the server did not redirect to its canonical trailing-slash form.
+    return last.includes(".") ? p.slice(0, p.lastIndexOf("/") + 1) : p + "/";
+  })();
+  const isAbsolute = /^(https?:)?\/\//.test(RAW) || RAW.startsWith("/");
+  const BASE = (MODE === "api" || isAbsolute) ? RAW
+    : new URL(RAW.replace(/^\.\//, ""), location.origin + docDir).href.replace(/\/+$/, "");
+
   const listUrl = MODE === "api" ? BASE + "/sites" : BASE + "/sites.json";
   const dataUrl = s => MODE === "api" ? BASE + "/sites/" + encodeURIComponent(s) + "/data"
                                       : BASE + "/" + encodeURIComponent(s) + ".json";
   const sub = document.getElementById("subline");
   let sites;
-  try { sites = await (await fetch(listUrl)).json(); }
+  try {
+    const r = await fetch(listUrl);
+    if (!r.ok) throw new Error(r.status);
+    sites = await r.json();
+  }
   catch (e) { sub.textContent = "Can't load the site list (" + listUrl + ")"; return; }
   const slug = new URLSearchParams(location.search).get("site") || (sites[0] && sites[0].slug);
   const sel = document.createElement("select");
