@@ -5,8 +5,10 @@
     "lat": 42.537278,
     "lon": -72.531694,
     "tz": "America/New_York",
-    "n_detections": 3127,
+    "n_detections": 7530,
     "first": "2026-07-25",
-    "last": "2026-07-26"
+    "last": "2026-08-12",
+    "recorder": "song-meter-micro-2",
+    "unit": "2MM43813"
   }
 ]
