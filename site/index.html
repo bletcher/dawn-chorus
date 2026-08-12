@@ -36,7 +36,10 @@
   *{box-sizing:border-box}
   body{margin:0; background:var(--bg); color:var(--ink);
     font:400 15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased;}
-  .wrap{max-width:1320px; margin:0 auto; padding:28px 20px 64px}
+  /* Fill the screen, but not without limit: chart heights scale with width (see ratioH)
+     so a wide window gets BIGGER charts rather than flatter ones. The cap keeps an
+     ultrawide from turning the prose and the scope bar into a single unreadable line. */
+  .wrap{max-width:min(2100px, 96vw); margin:0 auto; padding:28px 24px 64px}
   .display{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,ui-serif,serif;}
   header.masthead{display:flex; justify-content:space-between; align-items:flex-end; gap:16px;
     padding-bottom:18px; border-bottom:1px solid var(--line); margin-bottom:22px;}
@@ -841,6 +844,12 @@ function yOnsetLabel(){ return clockMode() ? "onset — time of day ↑" : "onse
 
 function ML(el, wide){ const w=W(el);
   return w<520 ? (wide?96:40) : (wide?172:52); }
+// Height from width, clamped. A value chart with a FIXED height gets letterboxed as the
+// window widens, which visually flattens every slope -- and these charts exist to judge
+// whether a slope is real. Scaling keeps the aspect honest at any width; the clamp stops
+// a phone getting a sliver and an ultrawide getting a billboard.
+function ratioH(el, ratio, lo, hi){
+  return Math.round(Math.min(hi, Math.max(lo, W(el)*ratio))); }
 function spName(n, el){ const w=W(el); const cap = w<520 ? 13 : 99;
   return n.length>cap ? n.slice(0,cap-1)+'…' : n; }
 
@@ -888,7 +897,7 @@ function renderEcdf(S){
     if(ncur) for(let b=0;b<NB;b++) lines.push({name, t:GRID[b], F:acc[b]/ncur}); });
   if(!lines.length){ el.innerHTML='<p class="empty">No selected species had enough detections in this period.</p>'; return; }
   const shown=[...new Set(lines.map(d=>d.name))];
-  el.append(Plot.plot({ width:W(el), height:410, marginLeft:ML(el,false), marginRight:20, style:plotStyle(),
+  el.append(Plot.plot({ width:W(el), height:ratioH(el,.55,360,520), marginLeft:ML(el,false), marginRight:20, style:plotStyle(),
     x:xAxis({grid:true}),
     y:{label:"↑ cumulative share of detections", domain:[0,1], ticks:[0,.25,.5,.75,1], grid:true},
     color:{domain:shown, range:shown.map(s=>colorFor[s]), legend:true},
@@ -942,7 +951,7 @@ function renderWeather(S, key, elId, xlabel, card){
   ];
   if(fitPts.length && Plot.linearRegressionY)
     marks.push(Plot.linearRegressionY(fitPts, {x:"x", y:d=>xv(d.y), stroke:d=>colorFor[d.name], z:"name", strokeWidth:1.5, ci:0}));
-  el.append(Plot.plot({ width:W(el), height:360, marginLeft:ML(el,false)+2, marginRight:20, style:plotStyle(),
+  el.append(Plot.plot({ width:W(el), height:ratioH(el,.46,320,480), marginLeft:ML(el,false)+2, marginRight:20, style:plotStyle(),
     x:{label:xlabel, grid:true},
     y:Object.assign({label:yOnsetLabel(), grid:true}, clockMode()?{tickFormat:hhmm}:{}),
     marks}));
@@ -989,7 +998,7 @@ function renderSeason(){
       strokeOpacity: on ? .95 : .08, ci:0}));
   });
 
-  const fig=Plot.plot({ width:W(el), height:420, marginLeft:ML(el,false)+4, marginRight:20, style:plotStyle(),
+  const fig=Plot.plot({ width:W(el), height:ratioH(el,.34,380,620), marginLeft:ML(el,false)+4, marginRight:20, style:plotStyle(),
     x:{label:"morning →", grid:true, type:"time"},
     y:Object.assign({label:yOnsetLabel(), grid:true}, clockMode()?{tickFormat:hhmm}:{}),
     color:{domain:shown, range:shown.map(s=>colorFor[s]||css("--muted")), legend:true},
