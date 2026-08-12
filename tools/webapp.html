@@ -85,6 +85,29 @@
   .flash.bad{background:#3a1414;color:#fecaca;display:block}
   tr.fresh td{background:#132a1e}
   .watch{color:var(--dim);font-size:11.5px;font-family:var(--mono)}
+  .job{background:var(--panel);border:1px solid var(--edge);border-radius:10px;
+       padding:13px 15px;margin-bottom:12px}
+  .jhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+         font-size:13px}
+  .jhead #jphase{font-weight:600}
+  .jhead #jcount{font-family:var(--mono);font-size:12.5px;color:var(--dim);
+                 font-variant-numeric:tabular-nums}
+  .jbar{height:8px;background:#0a1220;border-radius:99px;overflow:hidden;margin:9px 0 7px;
+        position:relative}
+  .jbar i{display:block;height:100%;width:0;border-radius:99px;background:var(--accent);
+          transition:width .3s ease;position:absolute;top:0;left:0}
+  /* work in flight sits behind banked work: dimmer, and gently pulsing so a long first
+     batch reads as "running" instead of "stuck at zero". */
+  .jbar #jghost{background:#1f6f63;opacity:.85;animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.45}}
+  .jbar.done #jghost, .jbar.failed #jghost{display:none;animation:none}
+  .jbar.indet i{width:35%;background:linear-gradient(90deg,transparent,var(--accent),transparent);
+                animation:slide 1.2s linear infinite}
+  @keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+  .jbar.done i{background:var(--ok)} .jbar.failed i{background:var(--bad)}
+  .jmeta{display:flex;justify-content:space-between;gap:12px;color:var(--dim);
+         font-size:11.5px;font-family:var(--mono)}
+  .jmeta span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -118,6 +141,15 @@
     <button data-cmd="publish">Publish (commit)</button>
     <button data-cmd="publish" data-push="1">Publish + push live</button>
     <button id="refresh">Refresh</button>
+  </div>
+
+  <div class="job" id="job" hidden>
+    <div class="jhead">
+      <span id="jphase">—</span>
+      <span id="jcount"></span>
+    </div>
+    <div class="jbar"><i id="jghost"></i><i id="jfill"></i></div>
+    <div class="jmeta"><span id="jcur"></span><span id="jtime"></span></div>
   </div>
 
   <div id="log">Ready.</div>
@@ -230,13 +262,47 @@ function busy(on){ document.querySelectorAll('button[data-cmd],[data-runsel]').f
   if (on) b.disabled = true; else if (!b.dataset.runsel) b.disabled = false; });
   if (!on) Object.keys(FILES).forEach(syncSel); }
 
+const clock = s => s == null ? '' :
+  (s >= 3600 ? `${Math.floor(s/3600)}h ${Math.round(s%3600/60)}m`
+   : s >= 60  ? `${Math.floor(s/60)}m ${Math.round(s%60)}s`
+              : `${Math.round(s)}s`);
+
 async function start(body){
   if (poll) return;
   seen = 0; $('#log').textContent = ''; busy(true);
+  const bar = $('#jbar') || document.querySelector('.jbar');
+  $('#job').hidden = false;
+  bar.className = 'jbar indet';
+  $('#jphase').textContent = body.only ? `${body.only.length} selected recording(s)` : body.command;
+  $('#jcount').textContent = ''; $('#jcur').textContent = 'starting…'; $('#jtime').textContent = '';
   const r = await (await fetch('/api/run', {method:'POST',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})).json();
   poll = setInterval(() => tick(r.job), 700);
   tick(r.job);
+}
+
+function renderProgress(j){
+  const bar = document.querySelector('.jbar'), fill = $('#jfill'), ghost = $('#jghost');
+  if (j.phase) $('#jphase').textContent = j.phase;
+  if (j.total > 0){
+    // `done` counts COMPLETED files. Files run concurrently, so also show the ones in
+    // flight -- otherwise the first whole batch reads as 0% and looks hung.
+    const pct = 100 * j.done / j.total;
+    const ghostPct = Math.min(100, 100 * (j.done + (j.running || 0)) / j.total);
+    bar.className = 'jbar' + (j.status === 'running' ? '' : ' ' + j.status);
+    fill.style.width = pct.toFixed(1) + '%';
+    ghost.style.width = ghostPct.toFixed(1) + '%';
+    $('#jcount').textContent = `${j.done} / ${j.total} done` +
+      (j.running ? ` · ${j.running} running` : '') + `  (${pct.toFixed(0)}%)`;
+    $('#jcur').textContent = j.current || '';
+  } else {
+    bar.className = 'jbar' + (j.status === 'running' ? ' indet' : ' ' + j.status);
+    ghost.style.width = '0';
+    if (j.status !== 'running') fill.style.width = '100%';
+    $('#jcount').textContent = '';
+  }
+  $('#jtime').textContent = clock(j.elapsed) +
+    (j.eta ? ` elapsed · ~${clock(j.eta)} left` : ' elapsed');
 }
 
 async function tick(id){
@@ -246,9 +312,14 @@ async function tick(id){
     $('#log').scrollTop = $('#log').scrollHeight;
     seen = j.n;
   }
-  $('#status').innerHTML = `<span class="dot ${j.status}"></span>${j.status} · ${j.elapsed}s` +
+  renderProgress(j);
+  $('#status').innerHTML = `<span class="dot ${j.status}"></span>${j.status} · ${clock(j.elapsed)}` +
     (j.returncode ? ` · exit ${j.returncode}` : '');
-  if (j.status !== 'running'){ clearInterval(poll); poll = null; busy(false); state(); }
+  if (j.status !== 'running'){
+    clearInterval(poll); poll = null; busy(false);
+    if (j.status === 'done'){ $('#jcur').textContent = 'finished'; document.querySelector('.jbar').className = 'jbar done'; $('#jfill').style.width = '100%'; }
+    state();
+  }
 }
 
 // --- uploads: one PUT per file, streamed, with progress ------------------------------

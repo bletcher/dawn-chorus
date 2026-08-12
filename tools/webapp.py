@@ -21,6 +21,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -149,11 +150,22 @@ def _file_rows(d) -> list[dict]:
     return rows
 
 
+# The engine reports per-file progress as "  [3/25] NAME (n detections)" and run.py heads
+# each deployment with "=== site/key (recorder) ===". Parsing them here rather than in the
+# browser keeps the wire format structured, and means a long run shows real progress
+# instead of a wall of text.
+_PROG = re.compile(r"^\s*\[(\d+)/(\d+)\]\s*(.*)$")
+_PHASE = re.compile(r"^=+\s*(.+?)\s*=+$")
+_WORKERS = re.compile(r"(\d+)\s+workers")
+
+
 def _spawn(cmd_args: list[str]) -> int:
     """Start tools/run.py in the background, collecting its output for the UI."""
     jid = next(_ids)
     job = {"id": jid, "argv": cmd_args, "lines": [], "status": "running",
-           "started": time.time(), "finished": None, "returncode": None}
+           "started": time.time(), "finished": None, "returncode": None,
+           "phase": None, "done": 0, "total": 0, "current": None, "phase_started": None,
+           "workers": 1}
     with _lock:
         _jobs[jid] = job
 
@@ -165,10 +177,27 @@ def _spawn(cmd_args: list[str]) -> int:
                                 encoding="utf-8", errors="replace")
         for line in proc.stdout:
             line = line.rstrip()
-            if line:
-                with _lock:
-                    job["lines"].append(line)
-                    del job["lines"][:-400]          # cap: this is a live log, not an archive
+            if not line:
+                continue
+            with _lock:
+                job["lines"].append(line)
+                del job["lines"][:-400]              # cap: this is a live log, not an archive
+                ph = _PHASE.match(line)
+                if ph:
+                    # A run can cover several deployments; each restarts its own count, so
+                    # the bar must reset rather than carry the previous phase's totals.
+                    job.update(phase=" ".join(ph.group(1).split()), done=0, total=0,
+                               current=None, phase_started=time.time(), workers=1)
+                    continue
+                m = _PROG.match(line)
+                if m:
+                    done, total, text = int(m.group(1)), int(m.group(2)), m.group(3)
+                    if job["phase_started"] is None:
+                        job["phase_started"] = time.time()
+                    w = _WORKERS.search(text)
+                    if w:
+                        job["workers"] = int(w.group(1))
+                    job.update(done=done, total=total, current=text or None)
         proc.wait()
         with _lock:
             job["returncode"] = proc.returncode
@@ -378,9 +407,24 @@ def job(jid: int, since: int = 0):
         j = _jobs.get(jid)
         if not j:
             raise HTTPException(404, "no such job")
-        return JSONResponse({"id": j["id"], "status": j["status"], "returncode": j["returncode"],
-                             "elapsed": round((j["finished"] or time.time()) - j["started"], 1),
-                             "lines": j["lines"][since:], "n": len(j["lines"])})
+        # ETA from this PHASE's own rate: earlier phases (and model loading) run at a
+        # different speed, so averaging across them would mislead on a long card dump.
+        eta = None
+        if j["status"] == "running" and j["done"] and j["total"] > j["done"] and j["phase_started"]:
+            per = (time.time() - j["phase_started"]) / j["done"]
+            eta = round(per * (j["total"] - j["done"]))
+        # Files run concurrently, so `done` alone reads as "stuck" for the first whole
+        # batch. Report how many are in flight as well, and the bar can show banked work
+        # and work-in-progress separately.
+        running = 0
+        if j["status"] == "running" and j["total"]:
+            running = max(0, min(j["workers"], j["total"] - j["done"]))
+        return JSONResponse({
+            "id": j["id"], "status": j["status"], "returncode": j["returncode"],
+            "elapsed": round((j["finished"] or time.time()) - j["started"], 1),
+            "phase": j["phase"], "done": j["done"], "total": j["total"],
+            "current": j["current"], "eta": eta, "workers": j["workers"], "running": running,
+            "lines": j["lines"][since:], "n": len(j["lines"])})
 
 
 @app.get("/", response_class=HTMLResponse)
