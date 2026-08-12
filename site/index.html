@@ -826,6 +826,8 @@ function renderWeather(S, key, elId, xlabel, card){
 
 // Onset against DATE. Deliberately ignores the time scope: a season is the thing being
 // measured, so restricting it to the scoped period would usually leave one or two points.
+let SEASON_HL = null;                       // species under the pointer, or null
+
 function renderSeason(){
   const el=document.getElementById("chart-season"); el.innerHTML="";
   const sel=new Set([...document.querySelectorAll(".season-sp:checked")].map(c=>c.value));
@@ -833,23 +835,81 @@ function renderSeason(){
   summary.forEach(r=>{ if(r.onset==null || !sel.has(r.name)) return;
     pts.push({name:r.name, d:new Date(r.date+"T00:00:00"), date:r.date, y:r.onset, n:r.n}); });
   autoThin("season", pts.length);
-  if(!pts.length){ el.innerHTML='<p class="empty">No species selected, or none has a defined onset yet.</p>'; return; }
+  if(!pts.length){ SEASON_HL=null;
+    el.innerHTML='<p class="empty">No species selected, or none has a defined onset yet.</p>'; return; }
   const shown=[...new Set(pts.map(p=>p.name))];
+  if(SEASON_HL && !shown.includes(SEASON_HL)) SEASON_HL=null;   // deselected while hovered
   const days={}; pts.forEach(p=>{ (days[p.name]=days[p.name]||new Set()).add(p.date); });
   const fitPts=pts.filter(p=> days[p.name].size>=4);
+
+  // Dim everything except the hovered species. Opacity rather than colour, so the legend
+  // still reads and a faint dot keeps its position as context.
+  const lit  = d => !SEASON_HL || d.name===SEASON_HL;
+  const fo   = d => lit(d) ? .85 : .10;
+  const rad  = d => (SEASON_HL && d.name===SEASON_HL) ? 5 : 3.6;
+  const lw   = d => (SEASON_HL && d.name===SEASON_HL) ? 3 : 1.5;
+  const lo   = d => lit(d) ? .95 : .12;
+
   const marks=[
     Plot.ruleY([xv(0)], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
-    Plot.dot(pts, {x:"d", y:d=>xv(d.y), fill:"name", r:3.6, fillOpacity:.85,
+    // Per-species line through its own mornings, so a highlighted species reads as a
+    // trajectory rather than a scatter. Sorted, or the path zig-zags by data order.
+    Plot.line(pts, {x:"d", y:d=>xv(d.y), stroke:"name", z:"name", sort:"d",
+      strokeWidth:d=>lit(d)?1.2:.8, strokeOpacity:d=>lit(d)?.45:.08}),
+    Plot.dot(pts, {x:"d", y:d=>xv(d.y), fill:"name", r:rad, fillOpacity:fo,
       stroke:css("--surface"), strokeWidth:.6, tip:true,
       title:d=>`${d.name}\n${d.date}\nonset ${xTitle(d.y)}\n${d.n} detections`}),
   ];
   if(fitPts.length && Plot.linearRegressionY)
-    marks.push(Plot.linearRegressionY(fitPts, {x:"d", y:d=>xv(d.y), stroke:"name", z:"name", strokeWidth:1.5, ci:0}));
-  el.append(Plot.plot({ width:W(el), height:420, marginLeft:56, marginRight:20, style:plotStyle(),
+    marks.push(Plot.linearRegressionY(fitPts, {x:"d", y:d=>xv(d.y), stroke:"name", z:"name",
+      strokeWidth:lw, strokeOpacity:lo, ci:0}));
+
+  const fig=Plot.plot({ width:W(el), height:420, marginLeft:56, marginRight:20, style:plotStyle(),
     x:{label:"morning →", grid:true, type:"time"},
     y:Object.assign({label:yOnsetLabel(), grid:true}, clockMode()?{tickFormat:hhmm}:{}),
     color:{domain:shown, range:shown.map(s=>colorFor[s]||css("--muted")), legend:true},
-    marks}));
+    marks});
+  el.append(fig);
+  wireSeasonHover(el, fig, pts);
+}
+
+// Highlight-on-hover. Nearest point in PIXEL space via the figure's own scales, rather
+// than reading back the rendered SVG: Plot's element order is an implementation detail,
+// and one extra mark would silently break any mapping built on it.
+function wireSeasonHover(el, fig, pts){
+  const sx=fig.scale && fig.scale("x"), sy=fig.scale && fig.scale("y");
+  if(!sx || !sy || !sx.apply || !sy.apply) return;
+  const proj=pts.map(p=>({name:p.name, cx:sx.apply(p.d), cy:sy.apply(xv(p.y))}))
+                .filter(q=>isFinite(q.cx) && isFinite(q.cy));
+  if(!proj.length) return;
+  const R2=44*44;                                   // generous: species, not individual dots
+  const svg=fig.querySelector("svg") || fig;
+  function pick(ev){
+    const r=svg.getBoundingClientRect();
+    const mx=ev.clientX-r.left, my=ev.clientY-r.top;
+    let best=null, bd=Infinity;
+    for(const q of proj){ const dx=q.cx-mx, dy=q.cy-my, d2=dx*dx+dy*dy;
+      if(d2<bd){ bd=d2; best=q; } }
+    return (best && bd<=R2) ? best.name : null;
+  }
+  // Re-render only when the species CHANGES: redrawing on every mousemove would fight
+  // the pointer and throw away the tooltip mid-hover.
+  svg.style.cursor="crosshair";
+  svg.addEventListener("mousemove", ev=>{
+    const sp=pick(ev);
+    if(sp!==SEASON_HL){ SEASON_HL=sp; renderSeason(); }
+  });
+  el.addEventListener("mouseleave", ()=>{ if(SEASON_HL!==null){ SEASON_HL=null; renderSeason(); } });
+  // The legend is the other natural place to aim at. Plot prefixes its class names with a
+  // per-plot hash ("{hash}-swatch"), so match the SUFFIX -- and only the swatch itself,
+  // never its "-swatches" container, whose class contains the same substring.
+  el.querySelectorAll('[class*="swatch"]').forEach(sw=>{
+    if(![...sw.classList].some(c=>/-swatch$/.test(c))) return;
+    const name=(sw.textContent||"").trim();
+    if(!name) return;
+    sw.style.cursor="pointer";
+    sw.addEventListener("mouseenter", ()=>{ if(SEASON_HL!==name){ SEASON_HL=name; renderSeason(); } });
+  });
 }
 
 function renderTable(S){
