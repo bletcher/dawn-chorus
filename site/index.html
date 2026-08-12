@@ -10,6 +10,7 @@
   :root{
     --bg:#eaeef4; --surface:#ffffff; --ink:#0f1622; --ink2:#48525f; --muted:#77818f;
     --grid:#e2e7ee; --line:#d6dde6; --accent:#2a78d6; --dawn:#c26a1b;
+    --spine-a:#7c93b8; --spine-b:#e8c79a;
     --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
     --seq-lo:#e7f0fb; --seq-hi:#12508f;
     --scope:#e6eef9;
@@ -19,6 +20,7 @@
   @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
     --bg:#0b0f16; --surface:#141a23; --ink:#eef2f8; --ink2:#aab4c2; --muted:#7c8695;
     --grid:#232b37; --line:#2b3542; --accent:#3987e5; --dawn:#e0913f;
+    --spine-a:#243c63; --spine-b:#8a5a24;
     --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
     --seq-lo:#172433; --seq-hi:#7db0ec; --scope:#161f2e; --shadow:0 1px 2px rgba(0,0,0,.4);
     color-scheme:dark;
@@ -26,6 +28,7 @@
   :root[data-theme="dark"]{
     --bg:#0b0f16; --surface:#141a23; --ink:#eef2f8; --ink2:#aab4c2; --muted:#7c8695;
     --grid:#232b37; --line:#2b3542; --accent:#3987e5; --dawn:#e0913f;
+    --spine-a:#243c63; --spine-b:#8a5a24;
     --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
     --seq-lo:#172433; --seq-hi:#7db0ec; --scope:#161f2e; --shadow:0 1px 2px rgba(0,0,0,.4);
     color-scheme:dark;
@@ -33,7 +36,7 @@
   *{box-sizing:border-box}
   body{margin:0; background:var(--bg); color:var(--ink);
     font:400 15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased;}
-  .wrap{max-width:1080px; margin:0 auto; padding:28px 20px 64px}
+  .wrap{max-width:1320px; margin:0 auto; padding:28px 20px 64px}
   .display{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,ui-serif,serif;}
   header.masthead{display:flex; justify-content:space-between; align-items:flex-end; gap:16px;
     padding-bottom:18px; border-bottom:1px solid var(--line); margin-bottom:22px;}
@@ -108,6 +111,46 @@
   .seg button:disabled{opacity:.4; cursor:not-allowed}
   input[type=range]{flex:1; accent-color:var(--accent); cursor:pointer; min-width:140px}
   input[type=range]:disabled{opacity:.45; cursor:default}
+  /* ── Chapters ─────────────────────────────────────────────────────────────────────
+     The page is a morning. Each chapter states a solar moment, the question it answers
+     and what the data says, then shows the charts that answer it. The rail sticks so the
+     question stays on screen while you read the chart -- the thing that makes this a
+     narrative rather than a stack of plots. */
+  .chapters{position:relative}
+  .chapter{display:grid; grid-template-columns:230px minmax(0,1fr); gap:26px;
+    align-items:start; margin:0 0 40px}
+  .rail{position:sticky; top:112px; padding-left:20px}
+  /* The spine is the signature: a vertical gradient from pre-dawn blue through the dawn
+     amber to daylight, with a node at each chapter. It is not decoration -- it is the
+     same solar axis every chart on the page is plotted against. */
+  .rail::before{content:""; position:absolute; left:0; top:6px; bottom:-40px; width:2px;
+    background:linear-gradient(180deg, var(--spine-a), var(--spine-b))}
+  .chapter:last-child .rail::before{bottom:auto; height:64px}
+  .rail::after{content:""; position:absolute; left:-4px; top:6px; width:10px; height:10px;
+    border-radius:50%; background:var(--dawn); box-shadow:0 0 0 3px var(--bg)}
+  .chwhen{display:block; font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);
+    font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--dawn);
+    font-weight:700; margin-bottom:7px}
+  .chtitle{font-size:20px; line-height:1.15; margin:0 0 8px; letter-spacing:-.01em;
+    text-wrap:balance}
+  .chq{font-size:13.5px; color:var(--ink2); margin:0 0 10px; line-height:1.5}
+  .chfind{font-size:13px; color:var(--muted); margin:0; line-height:1.55;
+    border-left:2px solid var(--line); padding-left:10px}
+  .chfind:empty{display:none}
+  .chbody{min-width:0}
+  /* Two charts that are meant to be compared sit side by side, not 400px apart. */
+  .chbody.pair{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px}
+  .chbody.pair > .card{margin-bottom:0}
+  @media (max-width:1100px){ .chbody.pair{grid-template-columns:1fr} .chbody.pair > .card{margin-bottom:20px} }
+  @media (max-width:900px){
+    /* Rail becomes a header: the question still arrives before the chart, which is the
+       point of the narrative -- it just stops being a column. */
+    .chapter{grid-template-columns:1fr; gap:12px; margin-bottom:30px}
+    .rail{position:static; padding-left:16px}
+    .rail::before{top:2px; bottom:2px}
+    .rail::after{top:2px}
+    .chtitle{font-size:18px}
+  }
   section.card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px 18px 8px; margin-bottom:20px; box-shadow:var(--shadow)}
   .card h2{font-size:19px; margin:0 0 3px; letter-spacing:-.01em}
   .card .lead{color:var(--ink2); font-size:13.5px; margin:0 0 14px; max-width:64ch}
@@ -224,64 +267,115 @@
     </div>
   </section>
 
-  <section class="card" data-card="timeline">
-    <h2 class="display">Who sings when</h2>
-    <p class="lead">Each bar spans a species' vocal activity &mdash; onset (5th percentile of detection
-      times) to offset (95th) &mdash; in minutes from <span class="tag">civil dawn</span> (dashed line),
-      taken as the <em>median across the scoped period's mornings</em>. Darker bars are sung more
-      continuously; the tick marks the median busiest minute.</p>
-    <div class="plot" id="chart-timeline"></div>
+  <div class="chapters">
+
+  <section class="chapter" id="ch-morning">
+    <div class="rail">
+      <span class="chwhen">dawn &minus;2h</span>
+      <h2 class="chtitle">The first voices</h2>
+      <p class="chq">Who starts singing, and how long do they keep going?</p>
+      <p class="chfind" id="find-morning"></p>
+    </div>
+    <div class="chbody">
+      <section class="card" data-card="timeline">
+        <h2 class="display">Who sings when</h2>
+        <p class="lead">Each bar spans a species' vocal activity &mdash; onset (5th percentile of detection
+          times) to offset (95th) &mdash; in minutes from <span class="tag">civil dawn</span> (dashed line),
+          taken as the <em>median across the scoped period's mornings</em>. Darker bars are sung more
+          continuously; the tick marks the median busiest minute.</p>
+        <div class="plot" id="chart-timeline"></div>
+      </section>
+    </div>
   </section>
 
-  <section class="card" data-card="ecdf">
-    <h2 class="display">Cumulative call distributions</h2>
-    <p class="lead">The empirical CDF <em>F(t)</em> &mdash; share of a species' detections that have
-      occurred by each minute &mdash; averaged across the period's mornings (each morning a replicate).
-      Onset reads where a curve crosses 0.05, median song-time at 0.5, offset at 0.95.</p>
-    <div class="controls"><div class="chips" id="ecdfChips"></div></div>
-    <div class="plot" id="chart-ecdf"></div>
+  <section class="chapter" id="ch-shape">
+    <div class="rail">
+      <span class="chwhen">dawn</span>
+      <h2 class="chtitle">The shape of a morning</h2>
+      <p class="chq">How does the chorus build and fade across the window?</p>
+      <p class="chfind" id="find-shape"></p>
+    </div>
+    <div class="chbody pair">
+      <section class="card" data-card="ecdf">
+        <h2 class="display">Cumulative call distributions</h2>
+        <p class="lead">The empirical CDF <em>F(t)</em> &mdash; share of a species' detections that have
+          occurred by each minute &mdash; averaged across the period's mornings (each morning a replicate).
+          Onset reads where a curve crosses 0.05, median song-time at 0.5, offset at 0.95.</p>
+        <div class="controls"><div class="chips" id="ecdfChips"></div></div>
+        <div class="plot" id="chart-ecdf"></div>
+      </section>
+      <section class="card" data-card="heat">
+        <h2 class="display">Occupancy across the morning</h2>
+        <p class="lead">Species &times; solar-minute. Colour is the fraction of the scoped period's mornings
+          a species was detected in each 5-minute bin &mdash; slide the time scope to watch the chorus shift.</p>
+        <div class="plot" id="chart-heat"></div>
+      </section>
+    </div>
   </section>
 
-  <section class="card" data-card="heat">
-    <h2 class="display">Occupancy across the morning</h2>
-    <p class="lead">Species &times; solar-minute. Colour is the fraction of the scoped period's mornings
-      a species was detected in each 5-minute bin &mdash; slide the time scope to watch the chorus shift.</p>
-    <div class="plot" id="chart-heat"></div>
+  <section class="chapter" id="ch-season">
+    <div class="rail">
+      <span class="chwhen">week to week</span>
+      <h2 class="chtitle">Through the season</h2>
+      <p class="chq">Does a species shift earlier or later as the year turns?</p>
+      <p class="chfind" id="find-season"></p>
+    </div>
+    <div class="chbody">
+      <section class="card" data-card="season">
+        <h2 class="display">Onset through the season</h2>
+        <p class="lead">Each dot is one species on one morning: when it started, against the date.
+          This is the seasonal question &mdash; <em>does a species shift earlier or later as the year
+          turns?</em> Trend lines appear for species with &ge;4 mornings. Unlike the charts above this
+          one ignores the time scope and always shows <em>every</em> morning, because a season is
+          what it is measuring.</p>
+        <div class="controls"><div class="chips" id="seasonChips"></div></div>
+        <div class="plot" id="chart-season"></div>
+      </section>
+    </div>
   </section>
 
-  <section class="card" data-card="season">
-    <h2 class="display">Onset through the season</h2>
-    <p class="lead">Each dot is one species on one morning: when it started, against the date.
-      This is the seasonal question &mdash; <em>does a species shift earlier or later as the year
-      turns?</em> Trend lines appear for species with &ge;4 mornings. Unlike the charts above this
-      one ignores the time scope and always shows <em>every</em> morning, because a season is
-      what it is measuring.</p>
-    <div class="controls"><div class="chips" id="seasonChips"></div></div>
-    <div class="plot" id="chart-season"></div>
+  <section class="chapter" id="ch-weather">
+    <div class="rail">
+      <span class="chwhen">each morning</span>
+      <h2 class="chtitle">Against the weather</h2>
+      <p class="chq">Do they start earlier when it is warm, later when it rains?</p>
+      <p class="chfind" id="find-weather"></p>
+    </div>
+    <div class="chbody pair">
+      <section class="card" data-card="temp">
+        <h2 class="display">Onset vs.&nbsp;temperature</h2>
+        <p class="lead">Each dot is a species on one morning: its onset (minutes from <span class="tag">civil
+          dawn</span>) against the temperature at dawn &mdash; the founding question, <em>does the chorus start
+          earlier on warm mornings?</em> A downward trend says yes. Per-species trend lines appear once a
+          species has &ge;4 mornings in the period; treat pooled patterns cautiously (weather confounds season).</p>
+        <div class="plot" id="chart-temp"></div>
+      </section>
+      <section class="card" data-card="rain">
+        <h2 class="display">Onset vs.&nbsp;rain</h2>
+        <p class="lead">Onset against total rainfall over the morning window (mm). Points sit at 0 on dry
+          mornings; a rightward shift on wet mornings would show birds starting later in the rain.</p>
+        <div class="plot" id="chart-rain"></div>
+      </section>
+    </div>
   </section>
 
-  <section class="card" data-card="temp">
-    <h2 class="display">Onset vs.&nbsp;temperature</h2>
-    <p class="lead">Each dot is a species on one morning: its onset (minutes from <span class="tag">civil
-      dawn</span>) against the temperature at dawn &mdash; the founding question, <em>does the chorus start
-      earlier on warm mornings?</em> A downward trend says yes. Per-species trend lines appear once a
-      species has &ge;4 mornings in the period; treat pooled patterns cautiously (weather confounds season).</p>
-    <div class="plot" id="chart-temp"></div>
+  <section class="chapter" id="ch-species">
+    <div class="rail">
+      <span class="chwhen">all mornings</span>
+      <h2 class="chtitle">Every species</h2>
+      <p class="chq">What did each one actually do?</p>
+      <p class="chfind" id="find-species"></p>
+    </div>
+    <div class="chbody">
+      <section class="card" data-card="table">
+        <h2 class="display">Per-species table</h2>
+        <p class="lead">Aggregated over the scoped period: mornings present, total detections, and median
+          onset/offset/span/peak/occupancy (minutes from civil dawn).</p>
+        <div class="tableScroll"><table id="tbl"></table></div>
+      </section>
+    </div>
   </section>
-
-  <section class="card" data-card="rain">
-    <h2 class="display">Onset vs.&nbsp;rain</h2>
-    <p class="lead">Onset against total rainfall over the morning window (mm). Points sit at 0 on dry
-      mornings; a rightward shift on wet mornings would show birds starting later in the rain.</p>
-    <div class="plot" id="chart-rain"></div>
-  </section>
-
-  <section class="card" data-card="table">
-    <h2 class="display">Per-species table</h2>
-    <p class="lead">Aggregated over the scoped period: mornings present, total detections, and median
-      onset/offset/span/peak/occupancy (minutes from civil dawn).</p>
-    <div class="tableScroll"><table id="tbl"></table></div>
-  </section>
+  </div>
 
   <footer id="foot"></footer>
 </div>
@@ -745,6 +839,11 @@ function xAxis(extra){
 const xTitle = v => clockMode() ? hhmm(v) : fmt(v,0)+" min";
 function yOnsetLabel(){ return clockMode() ? "onset — time of day ↑" : "onset — min from civil dawn ↑"; }
 
+function ML(el, wide){ const w=W(el);
+  return w<520 ? (wide?96:40) : (wide?172:52); }
+function spName(n, el){ const w=W(el); const cap = w<520 ? 13 : 99;
+  return n.length>cap ? n.slice(0,cap-1)+'…' : n; }
+
 function aggBySpecies(S){ const set=new Set(S), g={};
   summary.forEach(r=>{ if(set.has(r.date)){ (g[r.name] || (g[r.name]=[])).push(r); } });
   return g; }
@@ -760,8 +859,8 @@ function renderTimeline(S){
   }).filter(Boolean).sort((a,b)=>a.onset-b.onset);
   if(!rows.length){ el.innerHTML='<p class="empty">No species cleared the onset threshold in this period.</p>'; return; }
   const names=rows.map(d=>d.name);
-  el.append(Plot.plot({ width:W(el), height:names.length*26+80, marginLeft:172, marginRight:26, style:plotStyle(),
-    x:xAxis({grid:true}), y:{domain:names, label:null},
+  el.append(Plot.plot({ width:W(el), height:names.length*26+80, marginLeft:ML(el,true), marginRight:26, style:plotStyle(),
+    x:xAxis({grid:true}), y:{domain:names, label:null, tickFormat:n=>spName(n,el)},
     color:{type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")], legend:true, label:"median occupancy"},
     marks:[
       Plot.ruleX([xv(0)], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
@@ -789,7 +888,7 @@ function renderEcdf(S){
     if(ncur) for(let b=0;b<NB;b++) lines.push({name, t:GRID[b], F:acc[b]/ncur}); });
   if(!lines.length){ el.innerHTML='<p class="empty">No selected species had enough detections in this period.</p>'; return; }
   const shown=[...new Set(lines.map(d=>d.name))];
-  el.append(Plot.plot({ width:W(el), height:410, marginLeft:52, marginRight:20, style:plotStyle(),
+  el.append(Plot.plot({ width:W(el), height:410, marginLeft:ML(el,false), marginRight:20, style:plotStyle(),
     x:xAxis({grid:true}),
     y:{label:"↑ cumulative share of detections", domain:[0,1], ticks:[0,.25,.5,.75,1], grid:true},
     color:{domain:shown, range:shown.map(s=>colorFor[s]), legend:true},
@@ -809,8 +908,8 @@ function renderHeat(S){
   for(let si=0; si<names.length; si++) for(let bi=0; bi<NB; bi++){
     let pres=0; for(const di of dIdx){ const a=BDS[di+"|"+si]; if(a && a[bi]>0) pres++; }
     if(pres>0) rows.push({name:names[si], t:GRID[bi], occ:pres/dIdx.length}); }
-  el.append(Plot.plot({ width:W(el), height:names.length*20+80, marginLeft:172, marginRight:26, style:plotStyle(),
-    x:xAxis({grid:false}), y:{domain:names, label:null},
+  el.append(Plot.plot({ width:W(el), height:names.length*20+80, marginLeft:ML(el,true), marginRight:26, style:plotStyle(),
+    x:xAxis({grid:false}), y:{domain:names, label:null, tickFormat:n=>spName(n,el)},
     color:{type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")], legend:true, label:"fraction of the period's mornings singing"},
     marks:[
       Plot.rect(rows, {x1:d=>xv(d.t-HALF), x2:d=>xv(d.t+HALF), y:"name", fill:"occ", inset:0.5,
@@ -843,7 +942,7 @@ function renderWeather(S, key, elId, xlabel, card){
   ];
   if(fitPts.length && Plot.linearRegressionY)
     marks.push(Plot.linearRegressionY(fitPts, {x:"x", y:d=>xv(d.y), stroke:d=>colorFor[d.name], z:"name", strokeWidth:1.5, ci:0}));
-  el.append(Plot.plot({ width:W(el), height:360, marginLeft:54, marginRight:20, style:plotStyle(),
+  el.append(Plot.plot({ width:W(el), height:360, marginLeft:ML(el,false)+2, marginRight:20, style:plotStyle(),
     x:{label:xlabel, grid:true},
     y:Object.assign({label:yOnsetLabel(), grid:true}, clockMode()?{tickFormat:hhmm}:{}),
     marks}));
@@ -890,7 +989,7 @@ function renderSeason(){
       strokeOpacity: on ? .95 : .08, ci:0}));
   });
 
-  const fig=Plot.plot({ width:W(el), height:420, marginLeft:56, marginRight:20, style:plotStyle(),
+  const fig=Plot.plot({ width:W(el), height:420, marginLeft:ML(el,false)+4, marginRight:20, style:plotStyle(),
     x:{label:"morning →", grid:true, type:"time"},
     y:Object.assign({label:yOnsetLabel(), grid:true}, clockMode()?{tickFormat:hhmm}:{}),
     color:{domain:shown, range:shown.map(s=>colorFor[s]||css("--muted")), legend:true},
@@ -992,12 +1091,46 @@ function buildChips(){
   chipRow("seasonChips", "season-sp", renderSeason);
 }
 
+// Each chapter states what the data actually says, computed from the scoped period --
+// a narrative that ignored the numbers would be decoration. Empty text hides itself, so
+// a chapter with nothing to report says nothing rather than padding.
+function renderFindings(S){
+  const put=(id,html)=>{ const el=document.getElementById("find-"+id); if(el) el.innerHTML=html||""; };
+  const g=aggBySpecies(S);
+  const rows=Object.keys(g).map(n=>{ const rs=g[n].filter(r=>r.onset!=null);
+    return rs.length ? {n, onset:median(rs.map(r=>r.onset)), det:rs.reduce((s,r)=>s+r.n,0)} : null;
+  }).filter(Boolean).sort((a,b)=>a.onset-b.onset);
+
+  if(rows.length){
+    const f=rows[0], l=rows[rows.length-1];
+    put("morning", `${f.n} leads at ${xTitle(f.onset)}; ${l.n} is last at ${xTitle(l.onset)}. `+
+      `${rows.length} species have a defined onset over ${S.length} morning${S.length===1?"":"s"}.`);
+    put("shape", `${rows.length} species charted. Curves that rise early and steeply are the ones `+
+      `doing most of their singing before the light arrives.`);
+  } else { put("morning",""); put("shape",""); }
+
+  // Season and weather ignore the scope, so report from the whole record.
+  const withOnset=summary.filter(r=>r.onset!=null);
+  const days=new Set(withOnset.map(r=>r.date));
+  put("season", days.size>1
+    ? `${days.size} mornings from ${[...days].sort()[0]} to ${[...days].sort().pop()}. `+
+      `A species needs 4 mornings before a trend line is drawn.`
+    : "One morning so far — a trend needs several.");
+
+  const wx=DATA.weather||{}, wd=Object.keys(wx).filter(d=>wx[d] && wx[d].t!=null);
+  put("weather", wd.length
+    ? `Weather for ${wd.length} morning${wd.length===1?"":"s"}. Treat pooled patterns carefully: `+
+      `warm mornings also arrive later in the season.`
+    : "No weather attached yet — it fills in when mornings are generated with a connection.");
+  put("species", rows.length ? `Median values across ${S.length} morning${S.length===1?"":"s"} in scope.` : "");
+}
+
 function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S);
   setXOffset(S);
   renderTimeline(S); renderEcdf(S); renderHeat(S); renderSeason();
   renderWeather(S,"t","chart-temp","temperature at dawn (°C)","temp");
   renderWeather(S,"r","chart-rain","rain over the window (mm)","rain");
-  renderTable(S); updateAudioCard(S); }
+  renderTable(S); updateAudioCard(S); renderFindings(S); }
 
 // ---- card collapsing + settings ---------------------------------------------------------
 // Cards render into a hidden element as 0-wide, so anything opened has to be redrawn.
