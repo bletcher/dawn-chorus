@@ -393,10 +393,15 @@ TEMPLATE = r"""<!doctype html>
   .tile .k{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em}
   .tile .v{font-size:26px; font-weight:600; margin-top:3px; font-variant-numeric:tabular-nums}
   .tile .v small{font-size:13px; color:var(--ink2); font-weight:500}
-  .scopebar{position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:16px 20px;
-    flex-wrap:wrap; background:var(--scope); border:1px solid var(--line); border-radius:11px;
+  /* Column of rows: each control group gets its own line with a matching eyebrow label,
+     so "Time axis" reads as a peer of "Time scope" rather than one more inline control. */
+  .scopebar{position:sticky; top:0; z-index:20; display:flex; flex-direction:column;
+    align-items:stretch; gap:10px;
+    background:var(--scope); border:1px solid var(--line); border-radius:11px;
     padding:12px 16px; margin-bottom:22px; box-shadow:var(--shadow); backdrop-filter:saturate(1.2)}
-  .scopebar .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.09em; color:var(--muted); font-weight:600}
+  .scoperow{display:flex; align-items:center; gap:16px 20px; flex-wrap:wrap}
+  .scopebar .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.09em;
+    color:var(--muted); font-weight:600; min-width:78px}
   .periodlabel{font-size:14px; color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap}
   .scopehint{margin-left:auto; font-size:12px; color:var(--muted)}
   label.ctl{font-size:13px; color:var(--ink2); display:flex; align-items:center; gap:7px}
@@ -475,26 +480,30 @@ TEMPLATE = r"""<!doctype html>
   <div class="tiles" id="tiles"></div>
 
   <div class="scopebar">
-    <span class="eyebrow">Time&nbsp;scope</span>
-    <label class="ctl">Aggregate
-      <select id="aggSel">
-        <option value="day">Daily</option>
-        <option value="week">Weekly</option>
-        <option value="month">Monthly</option>
-        <option value="year">Yearly</option>
-      </select>
-    </label>
-    <label class="ctl">Time axis
+    <div class="scoperow">
+      <span class="eyebrow">Time&nbsp;scope</span>
+      <label class="ctl">Aggregate
+        <select id="aggSel">
+          <option value="day">Daily</option>
+          <option value="week">Weekly</option>
+          <option value="month">Monthly</option>
+          <option value="year">Yearly</option>
+        </select>
+      </label>
+      <label class="ctl grow">Period
+        <input type="range" id="periodSlider" min="0" max="0" step="1" value="0" aria-label="Period">
+      </label>
+      <span class="periodlabel" id="periodLabel"></span>
+      <span class="scopehint">scopes every chart below</span>
+    </div>
+    <div class="scoperow">
+      <span class="eyebrow">Time&nbsp;axis</span>
       <span class="seg" id="xmodeSeg" role="group" aria-label="Time axis">
         <button type="button" data-xmode="dawn" aria-pressed="true">from dawn</button>
         <button type="button" data-xmode="clock" aria-pressed="false">clock</button>
       </span>
-    </label>
-    <label class="ctl grow">Period
-      <input type="range" id="periodSlider" min="0" max="0" step="1" value="0" aria-label="Period">
-    </label>
-    <span class="periodlabel" id="periodLabel"></span>
-    <span class="scopehint">scopes every chart below</span>
+      <span class="scopehint">x-axis on the morning-profile charts</span>
+    </div>
   </div>
 
   <section class="card audio" id="audioCard" hidden>
