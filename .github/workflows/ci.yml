@@ -22,6 +22,16 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      # The dashboard is a ~35 KB inline script built by string substitution, so a
+      # Python-side change can emit JavaScript that does not parse -- the page then
+      # renders blank and nothing else in the build would notice. tests/test_emitted_js.py
+      # runs `node --check` over it, and skips itself when node is absent, so install it
+      # explicitly rather than relying on whatever the runner image happens to ship.
+      - name: Set up Node (for the emitted-JavaScript syntax check)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install (with dev extras)
         run: |
           python -m pip install --upgrade pip
@@ -31,3 +41,8 @@ jobs:
       # so no network or secrets are needed.
       - name: Run tests
         run: pytest -q
+
+      # Belt and braces: the committed page is what actually gets deployed, and it can
+      # go stale relative to the template it was generated from.
+      - name: Check the committed viewer's JavaScript
+        run: python tools/check_js.py site/index.html
