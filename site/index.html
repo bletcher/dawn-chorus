@@ -176,6 +176,12 @@
   .stepbtn{background:var(--surface); border:1px solid var(--line); color:var(--ink2); border-radius:6px; width:27px; height:27px; cursor:pointer; font-size:15px; line-height:1}
   .stepbtn:disabled{opacity:.4; cursor:default}
   .detidx{font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; min-width:30px; text-align:center}
+  .conflbl{display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--ink2);
+    margin-left:auto; white-space:nowrap}
+  .conflbl input[type=range]{width:120px; min-width:0; flex:none}
+  .conflbl output{font-family:var(--mono,ui-monospace,monospace); font-size:12px;
+    color:var(--ink); min-width:2.4em; text-align:right}
+  .confcount{font-size:12px; color:var(--muted); white-space:nowrap}
   .audioinfo{font-size:13px; color:var(--ink2); margin-top:9px; min-height:18px}
   .audioinfo .mono{font-family:ui-monospace,"SFMono-Regular",Menlo,monospace; font-size:12px}
   .listen{cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px}
@@ -263,6 +269,11 @@
         <button class="stepbtn" id="prevDet" title="previous detection">‹</button>
         <span class="detidx" id="detIdx"></span>
         <button class="stepbtn" id="nextDet" title="next detection">›</button>
+        <label class="conflbl" title="Hide label boxes scoring below this. The floor is the capture threshold — nothing weaker was ever written to disk.">label&nbsp;≥
+          <input type="range" id="labelConf" min="0.25" max="0.95" step="0.05" value="0.25">
+          <output id="labelConfOut">0.25</output>
+        </label>
+        <span class="confcount" id="labelConfCount"></span>
       </div>
     </div>
     <div class="audioinfo" id="audioInfo"></div>
@@ -653,6 +664,7 @@ function drawSpec(samples, sr){
   if(ax){ ax.children[0].textContent=(maxF/1000).toFixed(0)+" kHz"; ax.children[1].textContent=(maxF/2000).toFixed(0); ax.children[2].textContent="0"; } }
 
 function renderClip(){ if(cur && cur.clip){ drawSpec(cur.clip.samples, cur.clip.sampleRate); drawLabels(); } }
+let LABEL_MIN = 0.25;                     // live threshold for the label boxes
 function drawLabels(){                                     // BirdNET 3s detections boxed + named over the clip
   if(!cur || !cur.file || !DETS[cur.day]) return;
   const canvas=document.getElementById("spec"), ctx=canvas.getContext("2d"), W=canvas.width, H=canvas.height;
@@ -661,9 +673,11 @@ function drawLabels(){                                     // BirdNET 3s detecti
   // Every detection overlapping the clip, grouped by species. Keying on species alone
   // (the old behaviour) threw away all but the loudest, so a bird calling twice in one
   // clip showed a single box.
-  const bySp={};
+  const bySp={}; let inClip=0;
   DETS[cur.day].forEach(d=>{ const ft=(dawnSec + d[0]*60) - f.s;
     if(ft+SEG<startOff || ft>startOff+CLIP_SEC) return;
+    inClip++;
+    if(d[2] < LABEL_MIN) return;                        // below the live threshold
     (bySp[d[1]] || (bySp[d[1]]=[])).push({ft, si:d[1], c:d[2]}); });
 
   // Merge only what genuinely overlaps in time: with overlap 0 every detection keeps its
@@ -679,6 +693,8 @@ function drawLabels(){                                     // BirdNET 3s detecti
     }
   });
   rows.sort((a,b)=>a.ft-b.ft);
+  const cnt=document.getElementById('labelConfCount');
+  if(cnt) cnt.textContent = inClip ? `${rows.length} box${rows.length===1?'':'es'} · ${new Set(rows.map(r=>r.si)).size} species of ${inClip} detection${inClip===1?'':'s'} in view` : 'no detections in view';
 
   ctx.font="600 11px system-ui,sans-serif"; ctx.textBaseline="top";
   const laneEnd=[];                                        // right edge used so far, per lane
@@ -1290,6 +1306,12 @@ document.getElementById("nextDet").onclick = ()=>{ if(cur && cur.list && cur.pos
   ub.onchange=()=>{ ABASE=ub.value.trim()||meta.audio_base||"../data"; localStorage.setItem("dc_audio_base",ABASE);
     for(const k in headerCache) delete headerCache[k]; reloadCur(); };
   sm.onchange=()=>{ specMode=sm.value; localStorage.setItem("dc_spec_mode",specMode); renderClip(); };
+  const lc=document.getElementById("labelConf"), lo=document.getElementById("labelConfOut");
+  if(lc){ const saved=parseFloat(localStorage.getItem("dc_label_min")||"");
+    if(saved>=0.25 && saved<=0.95){ LABEL_MIN=saved; lc.value=String(saved); }
+    lo.value=LABEL_MIN.toFixed(2);
+    lc.oninput=()=>{ LABEL_MIN=parseFloat(lc.value); lo.value=LABEL_MIN.toFixed(2);
+      localStorage.setItem("dc_label_min", lc.value); renderClip(); }; }
 })();
 document.getElementById("theme").onclick = ()=>{ const curTheme=root.getAttribute("data-theme") ||
     (matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"); root.setAttribute("data-theme", curTheme==="dark"?"light":"dark"); renderAll(); };
