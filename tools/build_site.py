@@ -917,16 +917,42 @@ function drawLabels(){                                     // BirdNET 3s detecti
   if(!cur || !cur.file || !DETS[cur.day]) return;
   const canvas=document.getElementById("spec"), ctx=canvas.getContext("2d"), W=canvas.width, H=canvas.height;
   const f=cur.file, startOff=cur.startOff, dawnSec=DAWN[cur.day], SEG=3, dark=specMode!=="bw";
-  const best={};                                          // one box per species (highest conf) in the window
+
+  // Every detection overlapping the clip, grouped by species. Keying on species alone
+  // (the old behaviour) threw away all but the loudest, so a bird calling twice in one
+  // clip showed a single box.
+  const bySp={};
   DETS[cur.day].forEach(d=>{ const ft=(dawnSec + d[0]*60) - f.s;
     if(ft+SEG<startOff || ft>startOff+CLIP_SEC) return;
-    if(!best[d[1]] || d[2]>best[d[1]].c) best[d[1]]={ft, si:d[1], c:d[2]}; });
-  const rows=Object.values(best).sort((a,b)=>a.ft-b.ft);
+    (bySp[d[1]] || (bySp[d[1]]=[])).push({ft, si:d[1], c:d[2]}); });
+
+  // Merge only what genuinely overlaps in time: with overlap 0 every detection keeps its
+  // own box; with a denser run a run of windows collapses into one box spanning the bout.
+  const rows=[];
+  Object.values(bySp).forEach(list=>{
+    list.sort((a,b)=>a.ft-b.ft);
+    let bout=null;
+    for(const x of list){
+      if(bout && x.ft <= bout.end){ bout.end=Math.max(bout.end, x.ft+SEG);
+                                    bout.c=Math.max(bout.c, x.c); bout.n++; }
+      else { bout={ft:x.ft, end:x.ft+SEG, si:x.si, c:x.c, n:1}; rows.push(bout); }
+    }
+  });
+  rows.sort((a,b)=>a.ft-b.ft);
+
   ctx.font="600 11px system-ui,sans-serif"; ctx.textBaseline="top";
-  rows.forEach((r,i)=>{ const x1=Math.max(1,(r.ft-startOff)/CLIP_SEC*W), x2=Math.min(W-1,(r.ft+SEG-startOff)/CLIP_SEC*W);
-    ctx.strokeStyle=dark?"rgba(255,255,255,.85)":"rgba(0,0,0,.7)"; ctx.lineWidth=1.5; ctx.strokeRect(x1,2,x2-x1,H-4);
-    const lab=`${LABELSP[r.si]} ${r.c.toFixed(2)}`, tw=ctx.measureText(lab).width, ly=3+(i%3)*15;
-    ctx.fillStyle=dark?"rgba(0,0,0,.6)":"rgba(255,255,255,.82)"; ctx.fillRect(x1, ly, Math.min(tw+8, W-x1), 14);
+  const laneEnd=[];                                        // right edge used so far, per lane
+  rows.forEach(r=>{
+    const x1=Math.max(1,(r.ft-startOff)/CLIP_SEC*W), x2=Math.min(W-1,(r.end-startOff)/CLIP_SEC*W);
+    ctx.strokeStyle=dark?"rgba(255,255,255,.85)":"rgba(0,0,0,.7)"; ctx.lineWidth=1.5;
+    ctx.strokeRect(x1,2,Math.max(2,x2-x1),H-4);
+    const lab=`${LABELSP[r.si]} ${r.c.toFixed(2)}`+(r.n>1?` x${r.n}`:""), tw=ctx.measureText(lab).width;
+    let lane=0; while(lane<5 && laneEnd[lane]!=null && laneEnd[lane]>x1-4) lane++;
+    if(lane>=5) lane=0;                                    // out of lanes: overprint rather than hide
+    laneEnd[lane]=x1+tw+8;
+    const ly=3+lane*15;
+    ctx.fillStyle=dark?"rgba(0,0,0,.6)":"rgba(255,255,255,.82)";
+    ctx.fillRect(x1, ly, Math.min(tw+8, W-x1), 14);
     ctx.fillStyle=dark?"#fff":"#111"; ctx.fillText(lab, x1+4, ly+1); });
 }
 
