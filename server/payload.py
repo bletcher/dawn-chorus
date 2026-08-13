@@ -94,7 +94,9 @@ def build_payload(det_all: pd.DataFrame, lat: float, lon: float, tz: str,
 
     # --- labels: detections at >= label_min_conf (lower, so more calls show) ---
     lab = ann[ann["confidence"] >= label_min_conf]
-    winl = lab[(lab[acol] >= lo) & (lab[acol] < hi)]
+    # Labels feed the spectrogram browser, not the metrics, so they are NOT clipped to
+    # the analysis window -- otherwise the tail of every recording browses unlabelled.
+    winl = lab
     label_species = sorted(winl["common_name"].unique().tolist())
     lsp = {s: i for i, s in enumerate(label_species)}
     dets_by_day = {}

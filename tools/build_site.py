@@ -153,7 +153,9 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
         det_lab = dc.load_detections(db_path, min_confidence=label_min_conf, latitude=lat,
                                      longitude=lon, recorder=recorder)
     det_lab = dc.SolarModel(lat, lon, tz).annotate(det_lab)
-    winlab = det_lab[(det_lab[acol] >= lo) & (det_lab[acol] < hi)]
+    # NOT restricted to the analysis window: these drive the spectrogram browser, and
+    # a recording that runs past dawn+4h still deserves labels while you listen to it.
+    winlab = det_lab
     label_species = sorted(winlab["common_name"].unique().tolist())
     lsp = {s: i for i, s in enumerate(label_species)}
     dets_by_day = {}
@@ -1155,7 +1157,9 @@ function xAxis(extra){
     : {label:"minutes from civil dawn →", domain:meta.window};
   return Object.assign(base, extra||{});
 }
-const xTitle = v => clockMode() ? hhmm(v) : fmt(v,0)+" min";
+// Takes a value in minutes-from-dawn and renders it in whichever axis is showing, so
+// it must go through xv() first -- formatting the raw offset put a dawn robin at 23:47.
+const xTitle = v => v==null ? "-" : (clockMode() ? hhmm(xv(v)) : fmt(v,0)+" min");
 function yOnsetLabel(){ return clockMode() ? "onset — time of day ↑" : "onset — min from civil dawn ↑"; }
 
 function ML(el, wide){ const w=W(el);

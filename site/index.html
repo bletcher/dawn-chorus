@@ -895,7 +895,9 @@ function xAxis(extra){
     : {label:"minutes from civil dawn →", domain:meta.window};
   return Object.assign(base, extra||{});
 }
-const xTitle = v => clockMode() ? hhmm(v) : fmt(v,0)+" min";
+// Takes a value in minutes-from-dawn and renders it in whichever axis is showing, so
+// it must go through xv() first -- formatting the raw offset put a dawn robin at 23:47.
+const xTitle = v => v==null ? "-" : (clockMode() ? hhmm(xv(v)) : fmt(v,0)+" min");
 function yOnsetLabel(){ return clockMode() ? "onset — time of day ↑" : "onset — min from civil dawn ↑"; }
 
 function ML(el, wide){ const w=W(el);
