@@ -65,6 +65,10 @@ def cmd_process(args):
                 "--capture-conf", str(args.capture_conf),
                 "--min-confidence", str(args.min_confidence),
                 "--engine", args.engine]
+        argv += ["--overlap", str(args.overlap)]
+        # Only pin a week when asked. Left alone, the engine derives it per FILE, which
+        # matters across a month boundary: pinning one week for a batch spanning Aug 6-12
+        # applies late-July's species prior to recordings that are a week later.
         if args.week is not None:
             argv += ["--week", str(args.week)]
         if args.reprocess:
@@ -157,6 +161,11 @@ def main(argv=None):
                         help="what BirdNET logs (keep low; the dashboard filters higher)")
         sp.add_argument("--week", type=int, default=None,
                         help="BirdNET week 1-48 (default: inferred from the recording dates)")
+        sp.add_argument("--overlap", type=float, default=0.0,
+                        help="seconds of overlap between 3s windows (0-2.9). Higher catches "
+                             "calls that straddle a window boundary, at ~1.2x runtime per "
+                             "0.5s and proportionally more detections -- so change it for the "
+                             "WHOLE archive at once or n stops being comparable.")
         sp.add_argument("--engine", default="auto", choices=["auto", "litert", "analyzer"])
         sp.add_argument("--only", action="append", default=None, metavar="NAME",
                         help="process exactly these recordings (repeatable)")

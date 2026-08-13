@@ -150,12 +150,16 @@ def cmd_process(args):
     if not todo:
         print("nothing new to process.")
     else:
-        week = args.week if args.week is not None else infer_week(todo, args.recorder)
+        # None = let the engine derive the week from each FILE's own date. A single week
+        # for a whole batch applies one species prior to recordings days or weeks apart;
+        # the litert path already knows how to do it per file, so don't override it.
+        week = args.week
+        shown = week if week is not None else f"per file (~{infer_week(todo, args.recorder)})"
         eng = engine.resolve(args.engine)
         if args.classifier and eng != "analyzer":
             sys.exit("--classifier (a custom BirdNET model) needs --engine analyzer")
         print(f"[analyze] {len(todo)} recording(s), engine {eng}, model {model}, "
-              f"week {week}, capture >= {args.capture_conf}")
+              f"week {shown}, overlap {args.overlap}, capture >= {args.capture_conf}")
         engine.analyze([Path(args.audio) / n for n in todo], results,
                        lat=args.lat, lon=args.lon, week=week, min_conf=args.capture_conf,
                        recorder=args.recorder, overlap=args.overlap,
