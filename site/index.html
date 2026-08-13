@@ -687,8 +687,12 @@ function drawLabels(){                                     // BirdNET 3s detecti
     list.sort((a,b)=>a.ft-b.ft);
     let bout=null;
     for(const x of list){
-      if(bout && x.ft <= bout.end){ bout.end=Math.max(bout.end, x.ft+SEG);
-                                    bout.c=Math.max(bout.c, x.c); bout.n++; }
+      // STRICTLY less: with overlap 0 the windows are exactly adjacent (0-3, 3-6), and
+      // <= would fuse them into one box -- 47% of consecutive same-species detections sit
+      // exactly 3.0s apart, so that silently halved the labels again. Only genuinely
+      // overlapping windows (a denser run) merge.
+      if(bout && x.ft < bout.end){ bout.end=Math.max(bout.end, x.ft+SEG);
+                                   bout.c=Math.max(bout.c, x.c); bout.n++; }
       else { bout={ft:x.ft, end:x.ft+SEG, si:x.si, c:x.c, n:1}; rows.push(bout); }
     }
   });
