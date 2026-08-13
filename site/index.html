@@ -587,7 +587,8 @@ counts.forEach(([di,si,bi,c])=>{ const k=di+"|"+si; (BDS[k] || (BDS[k]=new Float
 
 const AUDIO = DATA.audio || null, DAWN = DATA.dawn || {}, CLIPS = DATA.clips || {};
 const LABELSP = meta.label_species || [], DETS = DATA.dets || {};
-const CLIP_SEC = 5.5, PRE = 0.5, SNAP_MIN = 2;            // ~5s clip; snap a click to a detection within 2 min
+const CLIP_SEC = 5.5, SNAP_MIN = 2;      // clip is centred on the window START (see loadAt);
+                                         // snap a click to a detection within 2 min
 let ABASE = localStorage.getItem("dc_audio_base") || meta.audio_base || "../data";
 let specMode = localStorage.getItem("dc_spec_mode") || "color";
 const audioFiles = {};                                    // basename -> File (from a picked local folder)
@@ -700,6 +701,16 @@ function drawLabels(){                                     // BirdNET 3s detecti
   const cnt=document.getElementById('labelConfCount');
   if(cnt) cnt.textContent = inClip ? `${rows.length} box${rows.length===1?'':'es'} · ${new Set(rows.map(r=>r.si)).size} species of ${inClip} detection${inClip===1?'':'s'} in view` : 'no detections in view';
 
+  // The 3s analysis grid. BirdNET scores whole windows on this fixed lattice, so a
+  // call is judged by the window it lands in, not by where it starts. Showing the
+  // boundaries is the difference between "no label" and "labelled in the next window".
+  ctx.save();
+  ctx.strokeStyle = dark ? "rgba(255,255,255,.20)" : "rgba(0,0,0,.18)";
+  ctx.setLineDash([3,4]); ctx.lineWidth=1;
+  for(let t=Math.ceil(startOff/SEG)*SEG; t<startOff+CLIP_SEC; t+=SEG){
+    const gx=(t-startOff)/CLIP_SEC*W;
+    ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,H); ctx.stroke(); }
+  ctx.restore();
   ctx.font="600 11px system-ui,sans-serif"; ctx.textBaseline="top";
   const laneEnd=[];                                        // right edge used so far, per lane
   rows.forEach(r=>{
