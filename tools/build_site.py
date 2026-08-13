@@ -504,6 +504,13 @@ TEMPLATE = r"""<!doctype html>
      the neighbouring heading. Species stays left (see the :first-child rule). */
   tbody td{padding:6px 10px; border-bottom:1px solid var(--grid); text-align:right}
   tbody tr:hover{background:color-mix(in srgb, var(--accent) 7%, transparent)}
+  /* Headers carry their definition on hover; the dotted underline is the affordance. */
+  thead th[title]{cursor:help; text-decoration:underline dotted 1px; text-underline-offset:3px;
+    text-decoration-color:var(--line)}
+  thead th[title]:hover{color:var(--ink)}
+  .tblnote{font-size:12.5px; color:var(--muted); margin:10px 2px 4px; line-height:1.5}
+  .tblnote button{font:inherit; font-size:12.5px; background:none; border:0; padding:0 2px;
+    color:var(--accent); cursor:pointer; text-decoration:underline}
   .tableScroll{max-height:440px; overflow:auto; border:1px solid var(--grid); border-radius:8px}
   footer{color:var(--muted); font-size:12.5px; margin-top:26px; line-height:1.7}
   footer a{color:var(--accent)}
@@ -688,6 +695,7 @@ TEMPLATE = r"""<!doctype html>
         <p class="lead">Aggregated over the scoped period: mornings present, total detections, and median
           onset/offset/span/peak/occupancy (minutes from civil dawn).</p>
         <div class="tableScroll"><table id="tbl"></table></div>
+      <p class="tblnote" id="tblNote"></p>
       </section>
     </div>
   </section>
@@ -1325,13 +1333,34 @@ function wireSeasonHover(el, fig, pts){
   });
 }
 
+// A single detection over a whole period is weak evidence, and BirdNET produces plenty of
+// them: this record contains a Caspian Tern and a Golden-crowned Kinglet, neither of which
+// is in Montague in August. Hiding them by default keeps the table trustworthy without
+// touching the data -- the toggle brings them straight back.
+const TABLE_MIN_DET = 3;
+let tableShowAll = false;
+
+const COLDESC = {
+  "Species":  "Common name as BirdNET labels it. Click a name to hear the call (daily scope, local dashboard only).",
+  "mornings": "How many mornings in the scoped period this species was detected at all. Cannot exceed the number of mornings in scope.",
+  "n":        "Total detections in the period. BirdNET emits roughly one per 3-second window per species, so this measures vocal ACTIVITY, not how many birds are present.",
+  "onset":    "Median start of song: the 5th percentile of detection times, in minutes from civil dawn. Needs at least 5 detections in a morning, otherwise blank.",
+  "offset":   "Median end of song: the 95th percentile of detection times, same units.",
+  "span":     "offset minus onset. How long the species was detectably vocalising, not the length of one song bout.",
+  "peak":     "Midpoint of the busiest 5-minute bin: when the species was most vocal.",
+  "occ":      "Occupancy, 0 to 1: the fraction of 5-minute bins between onset and offset that held at least one detection. High means continuous singing, low means sporadic."
+};
+
 function renderTable(S){
   const g=aggBySpecies(S);
-  const rows=Object.keys(g).map(name=>{ const rs=g[name];
+  const all=Object.keys(g).map(name=>{ const rs=g[name];
     return {name, mornings:rs.length, n:rs.reduce((s,r)=>s+r.n,0),
       onset:median(rs.map(r=>r.onset)), offset:median(rs.map(r=>r.offset)),
       span:median(rs.map(r=>r.span)), peak:median(rs.map(r=>r.peak)), occ:median(rs.map(r=>r.occ))};
   }).sort((a,b)=> (a.onset==null)-(b.onset==null) || (a.onset-b.onset) || (b.n-a.n));
+
+  const thin=all.filter(d=>d.n<TABLE_MIN_DET);
+  const rows=tableShowAll ? all : all.filter(d=>d.n>=TABLE_MIN_DET);
   const head=["Species","mornings","n","onset","offset","span","peak","occ"];
   const clickable = hasAudio() && S.length===1;
   const cell = d => clickable ? `<span class="listen" data-sp="${d.name}">${d.name}</span>` : d.name;
@@ -1339,8 +1368,23 @@ function renderTable(S){
     `<td>${fmt(d.onset,0)}</td><td>${fmt(d.offset,0)}</td><td>${fmt(d.span,0)}</td>`+
     `<td>${fmt(d.peak,0)}</td><td>${fmt(d.occ,2)}</td></tr>`).join("");
   const tbl=document.getElementById("tbl");
-  tbl.innerHTML = `<thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
-  if(clickable) tbl.querySelectorAll(".listen").forEach(s=> s.addEventListener("click", ()=>openAudioFor(s.dataset.sp)));
+  tbl.innerHTML = `<thead><tr>${head.map(h=>`<th title="${COLDESC[h]||""}">${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
+  if(clickable) tbl.querySelectorAll(".listen").forEach(x=> x.addEventListener("click", ()=>openAudioFor(x.dataset.sp)));
+
+  const note=document.getElementById("tblNote");
+  if(note){
+    if(!thin.length){ note.textContent = `${rows.length} species.`; }
+    else if(tableShowAll){
+      note.innerHTML = `${all.length} species, including ${thin.length} with fewer than `+
+        `${TABLE_MIN_DET} detections. <button type="button" id="tblToggle">Hide sparse ones</button>`;
+    } else {
+      note.innerHTML = `${rows.length} species shown; ${thin.length} with fewer than `+
+        `${TABLE_MIN_DET} detections hidden as weak evidence. `+
+        `<button type="button" id="tblToggle">Show all</button>`;
+    }
+    const b=document.getElementById("tblToggle");
+    if(b) b.onclick=()=>{ tableShowAll=!tableShowAll; renderTable(scopedDays()); };
+  }
 }
 
 function renderFoot(){ document.getElementById("foot").innerHTML =
