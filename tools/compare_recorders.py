@@ -316,15 +316,26 @@ def main(argv=None):
     for lbl in (la, lb):
         c = cov.get(lbl)
         if c is not None and not c.empty:
-            print(f"  {lbl:22} {c['minutes'].sum():.0f} recorded min, "
-                  f"{int(c['sample_rate'].max()):,} Hz "
-                  f"({c['sample_rate'].max() / 2000:.1f} kHz Nyquist), "
+            # Show EVERY rate present. A folder whose settings changed mid-series looks
+            # uniform if you print only the max, and that is exactly the case worth seeing.
+            rates = sorted(set(int(r) for r in c["sample_rate"].dropna()))
+            desc = ", ".join(f"{r:,} Hz ({r / 2000:.1f} kHz Nyquist)" for r in rates)
+            if len(rates) > 1:
+                desc += "  <- MIXED: this folder's settings changed mid-series"
+            print(f"  {lbl:22} {c['minutes'].sum():.0f} recorded min, {desc}, "
                   f"{int(c['channels'].max())} ch")
             for r in c.itertuples():
                 print(f"      {str(r.date)}  {r.start:%H:%M}-{r.end:%H:%M}")
     if len(cov) == 2 and all(not c.empty for c in cov.values()):
-        ra, rb = (int(cov[l]["sample_rate"].max()) for l in (la, lb))
-        if ra != rb:
+        # Rate over the SHARED mornings only. Taking the max across the whole folder
+        # reports a setting that was never in play during the comparison -- this archive
+        # switched from 24 to 48 kHz on 2026-08-08, long after the paired mornings.
+        def _rate(lbl):
+            c = cov[lbl]
+            c = c[c["date"].isin(shared)] if shared else c
+            return int(c["sample_rate"].max()) if not c.empty else None
+        ra, rb = _rate(la), _rate(lb)
+        if ra and rb and ra != rb:
             print(f"  ! sample rates differ ({ra:,} vs {rb:,} Hz). The lower box cannot represent "
                   f"anything above {min(ra, rb) / 2000:.1f} kHz, so some high-frequency species")
             print("    are unavailable to it by physics, not by hearing. Expect species-list gaps.")

@@ -159,7 +159,13 @@ REGISTRY: dict[str, Recorder] = {
         channels=1,
         notes=("Names files <UNIT>_YYYYMMDD_HHMMSS.wav (unit 2MM43813 here). Clock is set "
                "to station-local EDT, confirmed against civil dawn on 2026-07-25/26 — do "
-               "NOT pass --file-tz for this recorder."),
+               "NOT pass --file-tz for this recorder. "
+               "SAMPLE RATE CHANGED MID-SERIES: 24 kHz through 2026-08-07, 48 kHz from "
+               "2026-08-08. `sample_rate` below is the ORIGINAL setting and is only a "
+               "default — read the real rate from each WAV header (tools/audio_profile.py, "
+               "compare_recorders.audio_coverage) rather than trusting this field. The "
+               "change lifts Nyquist from 12 to 24 kHz, though BirdNET's mel bank tops out "
+               "near 15 kHz, so the usable gain is 12–15 kHz."),
     ),
     "song-meter-generic": Recorder(
         id="song-meter-generic",
