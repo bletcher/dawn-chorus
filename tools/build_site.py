@@ -1053,7 +1053,8 @@ function wireTimeClicks(el, S){
   svg.addEventListener("click", ev=>{
     const rect=svg.getBoundingClientRect();
     const iw=(svg.width && svg.width.baseVal && svg.width.baseVal.value) || rect.width;
-    openAudioAt(S[0], xs.invert((ev.clientX-rect.left)/rect.width*iw));
+    // xs.invert gives the DISPLAYED x; openAudioAt wants minutes from dawn.
+    openAudioAt(S[0], xinv(xs.invert((ev.clientX-rect.left)/rect.width*iw)));
   });
 }
 function updateAudioCard(S){
@@ -1148,6 +1149,10 @@ function setXOffset(S){
   XOFF = secs.length ? secs[Math.floor(secs.length/2)]/60 : 0;
 }
 const xv = m => m==null ? null : m + XOFF;                   // datum -> displayed x
+// ...and back. Anything that reads a position OFF a chart -- a click, a hit test -- must
+// undo the offset, or in clock mode it hands minutes-since-midnight to code expecting
+// minutes-from-dawn and every click lands at the end of the morning.
+const xinv = v => v==null ? null : v - XOFF;                 // displayed x -> datum
 const clockMode = () => SETTINGS.xmode==="clock" && XOFF>0;
 function hhmm(min){ let t=((Math.round(min)%1440)+1440)%1440;
   return String(Math.floor(t/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0"); }
