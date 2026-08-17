@@ -132,3 +132,31 @@ def describe(path: str | Path | None = None) -> str:
 
 if __name__ == "__main__":
     print(describe())
+
+
+def exclusions(site: str, path: str | Path | None = None) -> list[dict]:
+    """Curated non-bird exclusions for a site: [{date, species[], reason}, ...]."""
+    cfg = load(path)
+    return cfg.get("sites", {}).get(site, {}).get("exclusions", []) or []
+
+
+def apply_exclusions(det, site: str, path=None):
+    """Drop excluded (date, species) rows. Returns (filtered, notes).
+
+    Never silent: the caller prints the notes and the payload carries them, so a reader
+    can always see what was removed and why.
+    """
+    rules = exclusions(site, path)
+    if not rules or det is None or not len(det):
+        return det, []
+    import pandas as pd
+    dates = pd.to_datetime(det["datetime"]).dt.date.astype(str)
+    notes, keep = [], pd.Series(True, index=det.index)
+    for r in rules:
+        m = (dates == str(r["date"])) & det["common_name"].isin(r["species"])
+        n = int(m.sum())
+        if n:
+            keep &= ~m
+            notes.append({"date": r["date"], "species": list(r["species"]),
+                          "removed": n, "reason": r.get("reason", "")})
+    return det[keep].copy(), notes

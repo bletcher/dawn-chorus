@@ -87,6 +87,7 @@ def cmd_dashboard(args):
         out = ROOT / "site" / f"dashboard-{d.key}.html"
         print(f"\n=== dashboard {d.label} -> {out.name} ===")
         build_site.main(["--from-analyzer", str(d.results), "--audio", str(d.audio),
+                         "--site", d.site,
                          "--recorder", d.recorder, "--audio-url-base", f"../{d.audio.name}",
                          "--lat", str(d.lat), "--lon", str(d.lon), "--tz", d.tz,
                          "--min-confidence", str(args.min_confidence), "--out", str(out)])

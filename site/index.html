@@ -112,6 +112,11 @@
   .seg button:hover:not([aria-pressed="true"]):not(:disabled){background:var(--scope); color:var(--ink)}
   .seg button[aria-pressed="true"]{background:var(--accent); color:#fff; font-weight:600}
   .seg button:disabled{opacity:.4; cursor:not-allowed}
+  .pstep{font:inherit; font-size:15px; line-height:1; padding:3px 9px; cursor:pointer;
+    background:var(--surface); color:var(--ink2); border:1px solid var(--line);
+    border-radius:6px; flex:none}
+  .pstep:hover:not(:disabled){border-color:var(--accent); color:var(--ink)}
+  .pstep:disabled{opacity:.35; cursor:default}
   input[type=range]{flex:1; accent-color:var(--accent); cursor:pointer; min-width:140px}
   input[type=range]:disabled{opacity:.45; cursor:default}
   /* ── Chapters ─────────────────────────────────────────────────────────────────────
@@ -209,6 +214,8 @@
   .tableScroll{max-height:440px; overflow:auto; border:1px solid var(--grid); border-radius:8px}
   footer{color:var(--muted); font-size:12.5px; margin-top:26px; line-height:1.7}
   footer a{color:var(--accent)}
+  footer .excl{margin:0 0 14px; padding:9px 12px; border-left:3px solid var(--warn,#c9853f);
+    background:rgba(201,133,63,.09); border-radius:0 6px 6px 0; color:var(--ink)}
   @media (max-width:720px){ .tiles{grid-template-columns:repeat(2,1fr)} h1{font-size:27px} .scopehint{display:none} }
 </style>
 </head>
@@ -241,7 +248,9 @@
         </select>
       </label>
       <label class="ctl grow">Period
+        <button type="button" class="pstep" id="perPrev" aria-label="previous period" title="previous period">&lsaquo;</button>
         <input type="range" id="periodSlider" min="0" max="0" step="1" value="0" aria-label="Period">
+        <button type="button" class="pstep" id="perNext" aria-label="next period" title="next period">&rsaquo;</button>
       </label>
       <span class="periodlabel" id="periodLabel"></span>
       <span class="scopehint">scopes every chart below</span>
@@ -835,7 +844,7 @@ function scopedDays(){ const level=aggSel.value, pkey=periods[Math.min(+slider.v
   return meta.days.filter(d=>day_keys[d][level]===pkey); }
 function rebuildPeriods(){ periods = periodsFor(aggSel.value);
   slider.min=0; slider.max=Math.max(0, periods.length-1); slider.value=periods.length-1;
-  slider.disabled = periods.length<=1; renderAll(); }
+  slider.disabled = periods.length<=1; renderAll(); syncSteppers(); }
 
 function renderSubline(){ const m=meta, loc=(m.lat!=null&&m.lon!=null)?`${m.lat.toFixed(2)}, ${m.lon.toFixed(2)}`:"";
   document.getElementById("subline").innerHTML =
@@ -1191,7 +1200,18 @@ function renderTable(S){
   }
 }
 
+// Removed detections are stated, never quietly missing: a reader comparing a morning's
+// species count against the audio should be able to find out why it is short.
+function exclNote(){
+  const ex = meta.exclusions || [];
+  if(!ex.length) return "";
+  return `<p class="excl"><b>Excluded:</b> `+ ex.map(e =>
+    `${e.removed.toLocaleString()} detections of ${e.species.join(", ")} on ${e.date} &mdash; ${e.reason}`
+  ).join("<br>") + `</p>`;
+}
+
 function renderFoot(){ document.getElementById("foot").innerHTML =
+  exclNote()+
   `Onset/offset are the 5th/95th percentiles of detection times within the [dawn&minus;2h, dawn+4h] window; `+
   `mornings below the per-species detection floor get no onset. BirdNET does not separate song from call, so `+
   `"span" is vocal-activity span, not song-bout length. Charts by `+
@@ -1312,7 +1332,23 @@ document.getElementById("collapseAll").addEventListener("click", ()=>{
 applySettings();
 
 aggSel.onchange = rebuildPeriods;
-slider.oninput = renderAll;
+slider.oninput = ()=>{ renderAll(); syncSteppers(); };
+// Stepping one period at a time: a slider is poor for "the next morning", which is the
+// most common move when reading day by day.
+function syncSteppers(){
+  const a=document.getElementById("perPrev"), b=document.getElementById("perNext");
+  if(!a||!b) return;
+  const v=+slider.value, max=+slider.max;
+  a.disabled = slider.disabled || v<=0;
+  b.disabled = slider.disabled || v>=max;
+}
+function stepPeriod(delta){
+  const v=Math.max(0, Math.min(+slider.max, +slider.value + delta));
+  if(v===+slider.value) return;
+  slider.value=String(v); renderAll(); syncSteppers();
+}
+document.getElementById("perPrev").onclick = ()=>stepPeriod(-1);
+document.getElementById("perNext").onclick = ()=>stepPeriod(+1);
 document.getElementById("playBtn").onclick = playClip;
 document.getElementById("prevDet").onclick = ()=>{ if(cur && cur.list && cur.pos>0) loadAt(cur.day, cur.list, cur.pos-1); };
 document.getElementById("nextDet").onclick = ()=>{ if(cur && cur.list && cur.pos<cur.list.length-1) loadAt(cur.day, cur.list, cur.pos+1); };

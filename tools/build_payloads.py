@@ -59,8 +59,15 @@ def main(argv=None):
     det = dc.load_birdnet_analyzer(args.from_analyzer, min_confidence=0.0, latitude=args.lat,
                                    longitude=args.lon, tz=args.tz, file_tz=args.file_tz,
                                    recorder=args.recorder)
+    # Curated exclusions for this site, reported rather than applied silently.
+    import config as _cfg
+    det, excl_notes = _cfg.apply_exclusions(det, args.slug)
+    for n in excl_notes:
+        print(f"[exclude] {n['date']}: dropped {n['removed']:,} detections of "
+              f"{', '.join(n['species'])}")
     payload = build_payload(det, args.lat, args.lon, args.tz,
                             args.min_confidence, args.label_min_conf)
+    payload["meta"]["exclusions"] = excl_notes
 
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)

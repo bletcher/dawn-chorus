@@ -15,7 +15,8 @@
     "`audio` may be an ABSOLUTE path, which is how recordings live on a big external",
     "drive while the repo stays on the system disk -- a card dump is several GB. Each",
     "folder carries its own results/ and manifest.json, so a deployment moves as a unit;",
-    "repointing `audio` without moving those makes it look unprocessed and re-runs it all."
+    "repointing `audio` without moving those makes it look unprocessed and re-runs it all.",
+    "`exclusions` per site removes known non-bird sources: a date, the species it was misread as, and why. Curated by hand on purpose -- a huge spike can also be a real event, so nothing is dropped automatically. Excluded counts are printed at build time and carried in payload meta, never applied silently."
   ],
   "sites": {
     "montague": {
@@ -37,7 +38,18 @@
           "unit": "e74d3",
           "note": "Trial box, co-located with sm on 2026-08-06/07. 2-hour files. Scores ~0.1 lower confidence than the Song Meter (species-dependent), so its detections are NOT composition-comparable with sm - see tools/compare_recorders.py."
         }
-      }
+      },
+      "exclusions": [
+        {
+          "date": "2026-08-17",
+          "species": [
+            "Wild Turkey",
+            "Yellow-bellied Sapsucker",
+            "Red-bellied Woodpecker"
+          ],
+          "reason": "Rain on an upturned bucket produced a continuous percussive plink for ~4 hours. 1,005 Wild Turkey detections against a median of 0 on other mornings, at a median 3.0s gap; the same sound also read as woodpecker drumming. Bucket has since been turned over."
+        }
+      ]
     }
   }
 }

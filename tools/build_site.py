@@ -88,10 +88,23 @@ def scan_audio(audio_dir, lat, lon, tz, recorder=None):
 
 def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
                min_conf=0.5, file_tz=None, audio_dir=None, audio_base="../data", label_min_conf=0.25,
-               label_analyzer_path=None, recorder=None):
+               label_analyzer_path=None, recorder=None, site=None):
     out = dc.run(db_path=db_path, analyzer_path=analyzer_path, latitude=lat, longitude=lon,
                  tz=tz, min_confidence=min_conf, file_tz=file_tz, recorder=recorder)
     det, ms = out["detections"], out["morning_summary"]
+
+    # Curated non-bird exclusions (see deployments.json). Applied before the summary is
+    # recomputed, and reported -- a silent drop would be indistinguishable from a bug.
+    excl_notes = []
+    if site:
+        import config as _cfg
+        det, excl_notes = _cfg.apply_exclusions(det, site)
+        for n in excl_notes:
+            print(f"[exclude] {n['date']}: dropped {n['removed']:,} detections of "
+                  f"{', '.join(n['species'])}")
+        if excl_notes:
+            from dawnchorus import morning_summary as _ms
+            ms = _ms(det, None)
 
     cfg = DEFAULTS
     acol = _anchor_col(cfg["anchor"])            # min_from_dawn
@@ -155,6 +168,8 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
     det_lab = dc.SolarModel(lat, lon, tz).annotate(det_lab)
     # NOT restricted to the analysis window: these drive the spectrogram browser, and
     # a recording that runs past dawn+4h still deserves labels while you listen to it.
+    if site and excl_notes:
+        det_lab, _ = _cfg.apply_exclusions(det_lab, site)
     winlab = det_lab
     label_species = sorted(winlab["common_name"].unique().tolist())
     lsp = {s: i for i, s in enumerate(label_species)}
@@ -182,6 +197,7 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
         "earliest": earliest,
         "label_species": label_species,
         "audio_base": audio_base,
+        "exclusions": excl_notes,
         "recorders": (sorted(str(r) for r in det["recorder"].dropna().unique())
                       if "recorder" in det.columns else []),
     }
@@ -283,6 +299,8 @@ def main(argv=None):
     p.add_argument("--lat", type=float, required=True)
     p.add_argument("--lon", type=float, required=True)
     p.add_argument("--tz", required=True)
+    p.add_argument("--site", default=None,
+                   help="site slug in deployments.json; enables its curated exclusions")
     p.add_argument("--recorder", default=None,
                    help="recorder profile id (see dawnchorus/recorders.py); supplies the filename "
                         "convention + clock zone and tags the detections")
@@ -302,7 +320,8 @@ def main(argv=None):
     data = build_data(analyzer_path=args.from_analyzer, db_path=args.db, lat=args.lat,
                       lon=args.lon, tz=args.tz, min_conf=args.min_confidence, file_tz=args.file_tz,
                       audio_dir=args.audio, audio_base=args.audio_base, label_min_conf=args.label_min_conf,
-                      label_analyzer_path=args.label_from_analyzer, recorder=args.recorder)
+                      label_analyzer_path=args.label_from_analyzer, recorder=args.recorder,
+                      site=args.site)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(data), encoding="utf-8")
@@ -425,6 +444,11 @@ TEMPLATE = r"""<!doctype html>
   .seg button:hover:not([aria-pressed="true"]):not(:disabled){background:var(--scope); color:var(--ink)}
   .seg button[aria-pressed="true"]{background:var(--accent); color:#fff; font-weight:600}
   .seg button:disabled{opacity:.4; cursor:not-allowed}
+  .pstep{font:inherit; font-size:15px; line-height:1; padding:3px 9px; cursor:pointer;
+    background:var(--surface); color:var(--ink2); border:1px solid var(--line);
+    border-radius:6px; flex:none}
+  .pstep:hover:not(:disabled){border-color:var(--accent); color:var(--ink)}
+  .pstep:disabled{opacity:.35; cursor:default}
   input[type=range]{flex:1; accent-color:var(--accent); cursor:pointer; min-width:140px}
   input[type=range]:disabled{opacity:.45; cursor:default}
   /* ── Chapters ─────────────────────────────────────────────────────────────────────
@@ -522,6 +546,8 @@ TEMPLATE = r"""<!doctype html>
   .tableScroll{max-height:440px; overflow:auto; border:1px solid var(--grid); border-radius:8px}
   footer{color:var(--muted); font-size:12.5px; margin-top:26px; line-height:1.7}
   footer a{color:var(--accent)}
+  footer .excl{margin:0 0 14px; padding:9px 12px; border-left:3px solid var(--warn,#c9853f);
+    background:rgba(201,133,63,.09); border-radius:0 6px 6px 0; color:var(--ink)}
   @media (max-width:720px){ .tiles{grid-template-columns:repeat(2,1fr)} h1{font-size:27px} .scopehint{display:none} }
 </style>
 </head>
@@ -554,7 +580,9 @@ TEMPLATE = r"""<!doctype html>
         </select>
       </label>
       <label class="ctl grow">Period
+        <button type="button" class="pstep" id="perPrev" aria-label="previous period" title="previous period">&lsaquo;</button>
         <input type="range" id="periodSlider" min="0" max="0" step="1" value="0" aria-label="Period">
+        <button type="button" class="pstep" id="perNext" aria-label="next period" title="next period">&rsaquo;</button>
       </label>
       <span class="periodlabel" id="periodLabel"></span>
       <span class="scopehint">scopes every chart below</span>
@@ -1097,7 +1125,7 @@ function scopedDays(){ const level=aggSel.value, pkey=periods[Math.min(+slider.v
   return meta.days.filter(d=>day_keys[d][level]===pkey); }
 function rebuildPeriods(){ periods = periodsFor(aggSel.value);
   slider.min=0; slider.max=Math.max(0, periods.length-1); slider.value=periods.length-1;
-  slider.disabled = periods.length<=1; renderAll(); }
+  slider.disabled = periods.length<=1; renderAll(); syncSteppers(); }
 
 function renderSubline(){ const m=meta, loc=(m.lat!=null&&m.lon!=null)?`${m.lat.toFixed(2)}, ${m.lon.toFixed(2)}`:"";
   document.getElementById("subline").innerHTML =
@@ -1453,7 +1481,18 @@ function renderTable(S){
   }
 }
 
+// Removed detections are stated, never quietly missing: a reader comparing a morning's
+// species count against the audio should be able to find out why it is short.
+function exclNote(){
+  const ex = meta.exclusions || [];
+  if(!ex.length) return "";
+  return `<p class="excl"><b>Excluded:</b> `+ ex.map(e =>
+    `${e.removed.toLocaleString()} detections of ${e.species.join(", ")} on ${e.date} &mdash; ${e.reason}`
+  ).join("<br>") + `</p>`;
+}
+
 function renderFoot(){ document.getElementById("foot").innerHTML =
+  exclNote()+
   `Onset/offset are the 5th/95th percentiles of detection times within the [dawn&minus;2h, dawn+4h] window; `+
   `mornings below the per-species detection floor get no onset. BirdNET does not separate song from call, so `+
   `"span" is vocal-activity span, not song-bout length. Charts by `+
@@ -1574,7 +1613,23 @@ document.getElementById("collapseAll").addEventListener("click", ()=>{
 applySettings();
 
 aggSel.onchange = rebuildPeriods;
-slider.oninput = renderAll;
+slider.oninput = ()=>{ renderAll(); syncSteppers(); };
+// Stepping one period at a time: a slider is poor for "the next morning", which is the
+// most common move when reading day by day.
+function syncSteppers(){
+  const a=document.getElementById("perPrev"), b=document.getElementById("perNext");
+  if(!a||!b) return;
+  const v=+slider.value, max=+slider.max;
+  a.disabled = slider.disabled || v<=0;
+  b.disabled = slider.disabled || v>=max;
+}
+function stepPeriod(delta){
+  const v=Math.max(0, Math.min(+slider.max, +slider.value + delta));
+  if(v===+slider.value) return;
+  slider.value=String(v); renderAll(); syncSteppers();
+}
+document.getElementById("perPrev").onclick = ()=>stepPeriod(-1);
+document.getElementById("perNext").onclick = ()=>stepPeriod(+1);
 document.getElementById("playBtn").onclick = playClip;
 document.getElementById("prevDet").onclick = ()=>{ if(cur && cur.list && cur.pos>0) loadAt(cur.day, cur.list, cur.pos-1); };
 document.getElementById("nextDet").onclick = ()=>{ if(cur && cur.list && cur.pos<cur.list.length-1) loadAt(cur.day, cur.list, cur.pos+1); };
