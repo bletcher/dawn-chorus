@@ -17,7 +17,7 @@ Uses the Observable Plot *library* (vendored locally at `site/vendor/`) -- no Ob
 platform/account, no CDN, no build step, no server. Just open the file, or host `site/`.
 
     python tools/build_site.py --from-analyzer data/results \
-        --lat 42.53 --lon -72.53 --tz America/New_York --min-confidence 0.5 \
+        --lat 42.53 --lon -72.53 --tz America/New_York --min-confidence 0.4 \
         --out site/index.html
 """
 from __future__ import annotations
@@ -87,7 +87,7 @@ def scan_audio(audio_dir, lat, lon, tz, recorder=None):
 
 
 def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
-               min_conf=0.5, file_tz=None, audio_dir=None, audio_base="../data", label_min_conf=0.25,
+               min_conf=dc.CHART_MIN_CONFIDENCE, file_tz=None, audio_dir=None, audio_base="../data", label_min_conf=0.25,
                label_analyzer_path=None, recorder=None, site=None):
     out = dc.run(db_path=db_path, analyzer_path=analyzer_path, latitude=lat, longitude=lon,
                  tz=tz, min_confidence=min_conf, file_tz=file_tz, recorder=recorder)
@@ -305,7 +305,8 @@ def main(argv=None):
                    help="recorder profile id (see dawnchorus/recorders.py); supplies the filename "
                         "convention + clock zone and tags the detections")
     p.add_argument("--file-tz", dest="file_tz", default=None)
-    p.add_argument("--min-confidence", type=float, default=0.5)
+    p.add_argument("--min-confidence", type=float, default=dc.CHART_MIN_CONFIDENCE,
+                   help="confidence floor for the charts")
     p.add_argument("--label-min-confidence", dest="label_min_conf", type=float, default=0.25,
                    help="confidence floor for spectrogram labels (charts use --min-confidence)")
     p.add_argument("--audio", default=None,

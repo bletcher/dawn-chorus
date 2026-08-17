@@ -45,7 +45,7 @@ def main(argv=None):
     p.add_argument("--unit", default=None, help="serial of the physical box, e.g. 2MM43813")
     p.add_argument("--file-tz", dest="file_tz", default=None,
                    help="tz stamped in filenames if not station-local; overrides the profile")
-    p.add_argument("--min-confidence", type=float, default=0.5,
+    p.add_argument("--min-confidence", type=float, default=dc.CHART_MIN_CONFIDENCE,
                    help="confidence floor for the charts")
     p.add_argument("--label-min-confidence", dest="label_min_conf", type=float, default=0.25,
                    help="lower floor for spectrogram labels")

@@ -80,6 +80,8 @@ def main(argv=None):
     p.add_argument("--lat", type=float, required=True)
     p.add_argument("--lon", type=float, required=True)
     p.add_argument("--tz", required=True)
+    # Pinned at 0.50 on purpose: a diagnostic, not a chart. The recorder bake-off
+    # was concluded at 0.50, and its numbers should stay reproducible.
     p.add_argument("--min-confidence", type=float, default=0.5, help="analysis floor")
     p.add_argument("--tol", type=float, default=5.0,
                    help="seconds within which two detections are the same call (default 5; "

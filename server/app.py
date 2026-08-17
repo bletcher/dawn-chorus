@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from sqlalchemy import (DateTime, Float, ForeignKey, String, create_engine, func, select)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
+import dawnchorus as dc
 from payload import build_payload
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./dawnchorus.db")
@@ -158,7 +159,8 @@ def upload_detections(slug: str, dets: list[DetectionIn], x_api_key: str = Heade
 
 
 @app.get("/sites/{slug}/data")
-def site_data(slug: str, min_conf: float = 0.5, label_min_conf: float = 0.25):
+def site_data(slug: str, min_conf: float = dc.CHART_MIN_CONFIDENCE,
+              label_min_conf: float = 0.25):
     with SessionLocal() as db:
         site = db.scalar(select(Site).where(Site.slug == slug))
         if not site:

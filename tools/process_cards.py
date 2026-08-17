@@ -13,7 +13,7 @@ recorder clock is assumed to be station-local unless you pass --file-tz (e.g. UT
 
 Two confidence thresholds, by design (capture low, analyse higher):
   --capture-conf   what BirdNET logs           (default 0.25)
-  --min-confidence what the dashboard counts    (default 0.50)
+  --min-confidence what the dashboard counts    (default 0.40)
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from datetime import date
 from pathlib import Path
 
 import build_site  # sibling module in tools/
+import dawnchorus as dc
 
 
 def infer_week(audio_dir: str, recorder: str | None = None) -> int:
@@ -63,7 +64,7 @@ def main(argv=None):
                    help="tz the recording filenames are in (e.g. UTC); overrides the profile")
     p.add_argument("--week", type=int, default=None, help="BirdNET week 1..48 (default: inferred)")
     p.add_argument("--capture-conf", type=float, default=0.25)
-    p.add_argument("--min-confidence", type=float, default=0.50)
+    p.add_argument("--min-confidence", type=float, default=dc.CHART_MIN_CONFIDENCE)
     p.add_argument("--overlap", type=float, default=0.0, help="0-2.9s window overlap (higher = more detections, slower)")
     p.add_argument("--sensitivity", type=float, default=1.0, help="0.5-1.5; higher = more eager detections")
     p.add_argument("--threads", type=int, default=0, help="0 = auto (CPU count)")

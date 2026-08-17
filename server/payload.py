@@ -38,7 +38,7 @@ def _recorder_meta(det: pd.DataFrame) -> list[dict]:
 
 
 def build_payload(det_all: pd.DataFrame, lat: float, lon: float, tz: str,
-                  min_conf: float = 0.5, label_min_conf: float = 0.25,
+                  min_conf: float = dc.CHART_MIN_CONFIDENCE, label_min_conf: float = 0.25,
                   weather: bool = True, weather_cache: str | None = None,
                   weather_source: str = "archive") -> dict:
     """det_all: columns datetime (naive/aware local), scientific_name, common_name, confidence.

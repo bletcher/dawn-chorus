@@ -30,6 +30,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import build_site  # sibling module in tools/
+import dawnchorus as dc
 
 MANIFEST_NAME = "manifest.json"
 
@@ -281,7 +282,7 @@ def main(argv=None):
     pr.add_argument("--file-tz", dest="file_tz", default=None)
     pr.add_argument("--week", type=int, default=None)
     pr.add_argument("--capture-conf", type=float, default=0.25)
-    pr.add_argument("--min-confidence", type=float, default=0.50)
+    pr.add_argument("--min-confidence", type=float, default=dc.CHART_MIN_CONFIDENCE)
     pr.add_argument("--label-min-confidence", dest="label_min_conf", type=float, default=0.25,
                     help="confidence floor for spectrogram labels (charts use --min-confidence)")
     pr.add_argument("--overlap", type=float, default=0.0,

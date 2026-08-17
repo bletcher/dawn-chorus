@@ -15,11 +15,26 @@ __all__ = [
     "species_phenology", "composition", "richness", "DEFAULTS", "fetch_hourly",
     "morning_weather", "attach_weather", "weather_response", "species_ecdf",
     "ecdf_quantiles", "ecdf_distance", "run", "Recorder", "RECORDERS",
+    "CHART_MIN_CONFIDENCE",
 ]
 __version__ = "0.5.0"
 
+#: Confidence floor for everything CHARTED or PUBLISHED.
+#:
+#: 0.40, not BirdNET's conventional 0.50. On this archive the median detection confidence
+#: is 0.465 -- the bulk of real vocalisations sit just under the 0.50 line, 55% of what the
+#: analyser captured never reached a chart, and 22 plausible species existed only between
+#: 0.25 and 0.50. The cost is a longer false-positive tail, which is what the curated
+#: exclusions in deployments.json are for.
+#:
+#: Inference captures at 0.25 (track.py --capture-conf), so this can move again without
+#: re-running the models. It changes every n and every onset, so move it for the WHOLE
+#: archive at once or the series stops being comparable.
+CHART_MIN_CONFIDENCE = 0.40
 
-def run(db_path=None, latitude=None, longitude=None, tz=None, min_confidence=0.5,
+
+def run(db_path=None, latitude=None, longitude=None, tz=None,
+        min_confidence=CHART_MIN_CONFIDENCE,
         config=None, weather=False, weather_cache=None, weather_source="archive",
         analyzer_path=None, file_tz=None, recorder=None):
     """End-to-end: a detection source -> dict of tidy result frames.

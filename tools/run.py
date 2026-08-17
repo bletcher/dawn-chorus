@@ -30,6 +30,7 @@ for p in (str(HERE), str(ROOT)):
         sys.path.insert(0, p)
 
 import config                                        # noqa: E402
+import dawnchorus as dc                              # noqa: E402
 
 
 def _targets(args):
@@ -150,7 +151,8 @@ def main(argv=None):
             sp.add_argument("--site", default=None, help="site slug (default: all)")
             sp.add_argument("--deployment", default=None, help="deployment key, e.g. sm / owl")
         if conf:
-            sp.add_argument("--min-confidence", dest="min_confidence", type=float, default=0.5)
+            sp.add_argument("--min-confidence", dest="min_confidence", type=float,
+                            default=dc.CHART_MIN_CONFIDENCE)
         return sp
 
     common(sub.add_parser("status", help="what's configured and what's unprocessed"))

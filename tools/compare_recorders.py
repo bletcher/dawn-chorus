@@ -240,6 +240,8 @@ def main(argv=None):
     p.add_argument("--file-tz-a", dest="file_tz_a", default=None,
                    help="override A's clock zone (else the profile decides)")
     p.add_argument("--file-tz-b", dest="file_tz_b", default=None)
+    # Pinned at 0.50 on purpose: a diagnostic, not a chart. The recorder bake-off
+    # was concluded at 0.50, and its numbers should stay reproducible.
     p.add_argument("--min-confidence", type=float, default=0.5,
                    help="analysis floor, matching the dashboard (default 0.5)")
     p.add_argument("--out", default=None, help="folder for the CSVs (optional)")

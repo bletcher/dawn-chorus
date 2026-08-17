@@ -15,7 +15,8 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-from . import (load_detections, load_birdnet_analyzer, SolarModel, morning_summary,
+from . import (CHART_MIN_CONFIDENCE, load_detections, load_birdnet_analyzer,
+               SolarModel, morning_summary,
                species_phenology, fetch_hourly, morning_weather, attach_weather,
                weather_response)
 from .seasonal import composition, richness
@@ -45,7 +46,7 @@ def main(argv=None):
     p.add_argument("--file-tz", dest="file_tz", default=None,
                    help="tz the recording FILENAMES are stamped in (e.g. UTC for AudioMoth); "
                         "converted to --tz. Omit if filenames are already station-local.")
-    p.add_argument("--min-confidence", type=float, default=0.5)
+    p.add_argument("--min-confidence", type=float, default=CHART_MIN_CONFIDENCE)
     p.add_argument("--config", default=None)
     p.add_argument("--weather", action="store_true", help="fetch + join Open-Meteo covariates")
     p.add_argument("--weather-cache", default=None, help="CSV cache path for hourly weather")
