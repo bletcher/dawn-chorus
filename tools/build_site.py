@@ -459,11 +459,20 @@ TEMPLATE = r"""<!doctype html>
   .scopehint{margin-left:auto; font-size:12px; color:var(--muted)}
   /* The live cost of the current floor, beside the number that sets it -- the whole reason
      this control is in the toolbar rather than buried in Settings. */
-  .mdcount{font-size:12.5px; color:var(--ink2); font-variant-numeric:tabular-nums; white-space:nowrap}
+  .mdcount{font-size:12.5px; color:var(--ink2); font-variant-numeric:tabular-nums; white-space:nowrap;
+    min-width:22ch}   /* reserve the common case so the hint beside it stops twitching mid-drag */
   .mdcount b{color:var(--ink)}
   .mdcount .delta{color:var(--dawn); font-weight:600}
   label.ctl{font-size:13px; color:var(--ink2); display:flex; align-items:center; gap:7px}
   label.ctl.grow{flex:1; min-width:220px}
+  /* The floor's domain is FIXED (1-20), so its track is too. A flexible track gets
+     re-measured whenever the readout beside it changes width -- and that readout changes on
+     every drag -- so the right stepper would creep sideways under the cursor you were
+     using it with. The period slider above keeps flexing: its domain grows with the archive. */
+  label.ctl.fixed{flex:none}
+  label.ctl.fixed input[type=range]{flex:none; width:210px; min-width:0}
+  /* Same reason, one level in: 5 -> 20 must not shove the counts along. */
+  #minDetOut{display:inline-block; min-width:2ch; text-align:right}
   select{font:inherit; font-size:13px; padding:5px 8px; border-radius:7px; border:1px solid var(--line); background:var(--surface); color:var(--ink)}
   .setrow label:has(input:disabled){opacity:.5; cursor:not-allowed}
   .pstep{font:inherit; font-size:15px; line-height:1; padding:3px 9px; cursor:pointer;
@@ -622,7 +631,7 @@ TEMPLATE = r"""<!doctype html>
     </div>
     <div class="scoperow">
       <span class="eyebrow">Detection&nbsp;floor</span>
-      <label class="ctl grow">Min&nbsp;per&nbsp;morning
+      <label class="ctl fixed">Min&nbsp;per&nbsp;morning
         <button type="button" class="pstep" id="mdPrev" aria-label="lower the floor" title="lower the floor">&lsaquo;</button>
         <input type="range" id="minDet" min="1" max="20" step="1" value="5" aria-label="Minimum detections per morning">
         <button type="button" class="pstep" id="mdNext" aria-label="raise the floor" title="raise the floor">&rsaquo;</button>
