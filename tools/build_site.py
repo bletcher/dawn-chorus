@@ -1369,11 +1369,16 @@ function overviewNote(all, sparse, rows, S){
 function renderTimeline(S){
   const el=document.getElementById("chart-timeline"); el.innerHTML="";
   const g=aggBySpecies(S);
-  const rows=Object.keys(g).map(name=>{ const rs=g[name].filter(r=>r.onset!=null);
+  const rows=Object.keys(g).map(name=>{ const all=g[name], rs=all.filter(r=>r.onset!=null);
     if(!rs.length) return null;
+    // The medians can only come from mornings that HAVE an onset, but the count must not:
+    // summing n over `rs` reported a different number than the species table for 39 of 42
+    // species (Ruby-throated Hummingbird 12 vs 30) because it silently dropped the sparse
+    // mornings. n and mornings now mean what they mean everywhere else on the page; how
+    // many mornings actually backed the median is carried separately, in the tooltip.
     return {name, onset:median(rs.map(r=>r.onset)), offset:median(rs.map(r=>r.offset)),
       peak:median(rs.map(r=>r.peak)), occ:median(rs.map(r=>r.occ)),
-      n:rs.reduce((s,r)=>s+r.n,0), mornings:rs.length};
+      n:all.reduce((s,r)=>s+r.n,0), mornings:all.length, onsetMornings:rs.length};
   }).filter(Boolean).sort((a,b)=>a.onset-b.onset);
   if(!rows.length){ el.innerHTML='<p class="empty">No species cleared the onset threshold in this period.</p>'; return; }
   const names=rows.map(d=>d.name);
@@ -1385,9 +1390,11 @@ function renderTimeline(S){
       Plot.barX(rows, {x1:d=>xv(d.onset), x2:d=>xv(d.offset), y:"name", fill:"occ", rx:3, insetTop:5, insetBottom:5}),
       Plot.tickX(rows, {x:d=>xv(d.peak), y:"name", stroke:css("--ink"), strokeWidth:2, strokeOpacity:.85}),
       Plot.dot(rows, {x:d=>xv(d.onset), y:"name", r:3.4, fill:css("--ink"), stroke:css("--surface"), strokeWidth:1}),
-      Plot.text(rows, {x:d=>xv(d.offset), y:"name", text:d=>d.n, dx:8, textAnchor:"start", fill:css("--muted"), fontSize:10}),
+      Plot.text(rows, {x:d=>xv(d.offset), y:"name", text:d=>d.n.toLocaleString(), dx:8, textAnchor:"start", fill:css("--muted"), fontSize:10}),
       Plot.tip(rows, Plot.pointerY({x:d=>xv(d.onset), y:"name",
-        title:d=>`${d.name}\nonset ${xTitle(d.onset)}  offset ${xTitle(d.offset)}\nspan ${fmt(d.offset-d.onset,0)} min · occ ${fmt(d.occ,2)}\n${d.n} detections over ${d.mornings} morning(s)`}))
+        title:d=>`${d.name}\nonset ${xTitle(d.onset)}  offset ${xTitle(d.offset)}\nspan ${fmt(d.offset-d.onset,0)} min · occ ${fmt(d.occ,2)}\n`+
+          `${d.n.toLocaleString()} detections over ${d.mornings} morning(s)\n`+
+          `median from ${d.onsetMornings} morning(s) with a defined onset`}))
     ]}));
   wireTimeClicks(el, S);
 }
