@@ -178,6 +178,24 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
         dets_by_day[str(d)] = [[round(float(a), 2), lsp[s], round(float(c), 2)]
                                for s, a, c in zip(g["common_name"], g[acol], g["confidence"])]
 
+    # Raw in-window detection TIMES per (morning, species), from the charted set. This is
+    # what lets the page recompute onset/offset/peak/occupancy at whatever detection floor
+    # the reader picks, instead of the floor being frozen at build time.
+    #
+    # Deliberately built from `win` (already confidence-filtered here) rather than
+    # re-filtering `dets` in the browser: `dets` rounds confidence to 2dp, so a detection
+    # at 0.3996 would round to 0.40 and slip past a browser-side test that Python had
+    # excluded. Same numbers, one filter, no drift.
+    phen_species = sorted(win["common_name"].unique().tolist())
+    psp = {s: i for i, s in enumerate(phen_species)}
+    phen = {}
+    for (d, sp), g in win.groupby(["date", "common_name"]):
+        # 3dp, not the 2dp used for spectrogram labels: onset is an INTERPOLATION between
+        # two of these, so their rounding error lands directly in the reported number. At
+        # 2dp it moved onset by up to 3s, enough to disagree with the CSVs at one decimal.
+        phen.setdefault(str(d), {})[psp[sp]] = [round(float(v), 3)
+                                                for v in sorted(g[acol].tolist())]
+
     valid = ms.dropna(subset=["onset_min"])
     earliest = None
     if not valid.empty:
@@ -196,6 +214,9 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
         "top_species": [s for s in totals.index if s in heat_set],   # by detections (ECDF default + colour)
         "earliest": earliest,
         "label_species": label_species,
+        "phen_species": phen_species,
+        "min_detections": int(cfg["min_detections_per_morning"]),   # the build-time default
+        "onset_quantile": float(cfg["onset_quantile"]),
         "audio_base": audio_base,
         "exclusions": excl_notes,
         "recorders": (sorted(str(r) for r in det["recorder"].dropna().unique())
@@ -214,7 +235,8 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
         if dw is not None:
             dawn[d] = dw.hour * 3600 + dw.minute * 60 + dw.second
     return {"meta": meta, "summary": summary, "counts": counts, "day_keys": day_keys,
-            "audio": audio, "dawn": dawn, "clips": clips, "dets": dets_by_day}
+            "audio": audio, "dawn": dawn, "clips": clips, "dets": dets_by_day,
+            "phen": phen}
 
 
 def render_html(data: dict) -> str:
@@ -396,6 +418,12 @@ TEMPLATE = r"""<!doctype html>
   .setrow > b{font-size:13px}
   .setrow label{display:flex; gap:8px; align-items:flex-start; font-size:13.5px; cursor:pointer}
   .setrow small{color:var(--muted); display:block; font-size:12px; line-height:1.45}
+  .setslider{flex-direction:column; gap:8px; cursor:default}
+  .setslider-ctl{display:flex; align-items:center; gap:10px; width:100%}
+  .setslider-ctl input[type=range]{flex:1; accent-color:var(--accent); cursor:pointer}
+  .setslider-ctl output{font-variant-numeric:tabular-nums; font-weight:700; font-size:13px;
+    min-width:2ch; text-align:right; color:var(--ink)}
+  #minDetNote{margin:2px 0 0; color:var(--ink2)}
   .modal{position:fixed; inset:0; z-index:50; display:flex; align-items:flex-start; justify-content:center;
     padding:44px 16px; background:rgba(9,13,20,.55); overflow:auto}
   .modal[hidden]{display:none}
@@ -798,6 +826,27 @@ TEMPLATE = r"""<!doctype html>
     </div>
 
     <div class="setrow">
+      <b>Detection floor</b>
+      <label class="setslider"><span>Minimum detections per morning
+          <small>A species needs this many detections in one morning's window before that
+            morning gets an onset. Below it the morning still counts toward totals and
+            presence, but contributes no phenology &mdash; and a species with no qualifying
+            morning drops out of <em>Who sings when</em>, the cumulative curves and the
+            seasonal trend entirely. Changing it recomputes every chart on this page.</small></span>
+        <span class="setslider-ctl">
+          <input type="range" id="minDet" min="1" max="20" step="1" value="5">
+          <output id="minDetOut">5</output>
+        </span>
+      </label>
+      <p class="fine" id="minDetNote"></p>
+      <p class="fine">Caution: onset is the 5th percentile of detection times, and with fewer
+        than 21 detections that percentile is an interpolation between the two earliest
+        points &mdash; at 5 it sits 80% on the single earliest. Lowering the floor surfaces
+        more species, but each new onset is one stray early detection away from moving a long
+        way. The build default is <span class="tag" id="minDetDefault">5</span>.</p>
+    </div>
+
+    <div class="setrow">
       <b>Cards</b>
       <label><input type="checkbox" id="autoCollapse" checked>
         <span>Collapse thin charts automatically
@@ -896,7 +945,8 @@ TEMPLATE = r"""<!doctype html>
 <script type="application/json" id="data">/*__DATA__*/</script>
 <script>
 function boot(DATA){
-const {meta, summary, counts, day_keys} = DATA;
+const {meta, counts, day_keys} = DATA;
+const BUILT_SUMMARY = DATA.summary;                      // build-time, at meta.min_detections
 const root = document.documentElement;
 const css = v => getComputedStyle(root).getPropertyValue(v).trim();
 const fmt = (x, d=0) => (x==null || Number.isNaN(x)) ? "—" : Number(x).toFixed(d);
@@ -905,6 +955,62 @@ const seriesColors = () => ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--
 const GRID = meta.grid, NB = GRID.length, HALF = meta.bin/2;
 const DAYIDX = {}; meta.days.forEach((d,i)=> DAYIDX[d]=i);
 const SPIDX = {}; meta.species.forEach((s,i)=> SPIDX[s]=i);
+
+// ---- phenology, recomputed in the browser -----------------------------------------------
+// The detection floor used to be frozen at build time: onset/offset were computed in Python
+// with min_detections_per_morning=5 and the page only ever saw the answer. That made the
+// floor unquestionable from the outside, which is the wrong property for a parameter this
+// consequential -- at n=5 the 5th percentile still puts 80% of its weight on the single
+// earliest detection, so where the floor sits decides which species have a phenology at all.
+//
+// DATA.phen carries the raw in-window detection times per (morning, species) from the same
+// charted set Python used, so every number below is recomputed here at MIN_DET. Falls back
+// to the build-time summary when a payload predates this.
+const PHEN = DATA.phen || null, PHSP = meta.phen_species || [];
+const QO = meta.onset_quantile!=null ? meta.onset_quantile : 0.05;
+let MIN_DET = (()=>{ const v=parseInt(localStorage.getItem("dc_min_det"),10);
+  return Number.isFinite(v) && v>=1 && v<=30 ? v : (meta.min_detections || 5); })();
+
+// numpy's 'linear' interpolation, so the browser and Python place a quantile identically.
+function quantileSorted(m, q){
+  const n=m.length; if(!n) return null; if(n===1) return m[0];
+  const pos=q*(n-1), lo=Math.floor(pos), w=pos-lo;
+  return w ? m[lo] + w*(m[lo+1]-m[lo]) : m[lo];
+}
+const _sumCache = {};
+function summaryAt(floor){
+  if(!PHEN) return BUILT_SUMMARY;                        // old payload: nothing to recompute from
+  if(_sumCache[floor]) return _sumCache[floor];
+  const rows=[], lo=meta.window[0], bw=meta.bin;
+  for(const day in PHEN){
+    const bySp=PHEN[day];
+    for(const si in bySp){
+      const m=bySp[si], n=m.length, name=PHSP[si];
+      const cnt=new Int32Array(NB);
+      for(const t of m){ let b=Math.floor((t-lo)/bw); if(b>=0 && b<NB) cnt[b]++; }
+      let onset=null, offset=null, span=null, occ=null;
+      if(n>=floor){
+        onset=quantileSorted(m,QO); offset=quantileSorted(m,1-QO);
+        if(offset>onset) span=offset-onset;
+        let nb=0, hit=0;
+        for(let b=0;b<NB;b++){ const c=GRID[b];
+          if(c>=onset && c<=offset){ nb++; if(cnt[b]>0) hit++; } }
+        occ = nb ? hit/nb : null;
+      }
+      let peak=null, best=-1;
+      for(let b=0;b<NB;b++) if(cnt[b]>best){ best=cnt[b]; peak=GRID[b]; }
+      if(best<=0) peak=null;
+      rows.push({date:day, name, n, onset, offset, span, peak, occ});
+    }
+  }
+  rows.sort((a,b)=> a.date<b.date?-1:a.date>b.date?1:(a.name<b.name?-1:1));
+  return (_sumCache[floor]=rows);
+}
+let summary = summaryAt(MIN_DET);
+function setMinDet(v){
+  MIN_DET=v; localStorage.setItem("dc_min_det", String(v));
+  summary=summaryAt(v);
+}
 
 // per (dayIdx|spIdx) -> dense bin-count array. The single building block for every chart.
 const BDS = {};
@@ -1208,7 +1314,13 @@ function renderSubline(){ const m=meta, loc=(m.lat!=null&&m.lon!=null)?`${m.lat.
   document.getElementById("subline").innerHTML =
     `${m.days.length} morning${m.days.length>1?"s":""} &middot; ${loc} &middot; ${m.tz||""}`; }
 
-function renderTiles(){ const m=meta, e=m.earliest;
+function renderTiles(){ const m=meta;
+  // Earliest onset depends on the floor, so it is recomputed rather than read from the
+  // build-time meta -- a headline tile contradicting the charts below it would be worse
+  // than no tile.
+  let e=m.earliest;
+  if(PHEN){ e=null;
+    summary.forEach(r=>{ if(r.onset!=null && (!e || r.onset<e.onset)) e={name:r.name, onset:r.onset}; }); }
   const tiles=[["Mornings", `${m.days[0]||"—"}${m.days.length>1?" → "+m.days[m.days.length-1]:""}`],
     ["Species", m.n_species],
     ["Detections", m.n_detections.toLocaleString()+` <small>&ge;${m.min_confidence} conf</small>`],
@@ -1408,7 +1520,7 @@ function renderEcdf(S){
     const acc=new Float64Array(NB); let ncur=0;
     for(const di of dIdx){ const a=BDS[di+"|"+si]; if(!a) continue;
       let tot=0; for(let b=0;b<NB;b++) tot+=a[b];
-      if(tot<5) continue;                                   // library floor: >=5 detections/morning
+      if(tot<MIN_DET) continue;                             // same floor the rest of the page uses
       let cum=0; for(let b=0;b<NB;b++){ cum+=a[b]; acc[b]+=cum/tot; } ncur++; }
     if(ncur) for(let b=0;b<NB;b++) lines.push({name, t:GRID[b], F:acc[b]/ncur}); });
   if(!lines.length){ el.innerHTML='<p class="empty">No selected species had enough detections in this period.</p>'; return; }
@@ -1756,6 +1868,25 @@ function applySettings(){
     }
   });
   const ac=document.getElementById("autoCollapse"); if(ac) ac.checked = !!SETTINGS.autoCollapse;
+  const md=document.getElementById("minDet"), mo=document.getElementById("minDetOut");
+  if(md){ md.value=String(MIN_DET); md.disabled=!PHEN;
+    md.title = PHEN ? "" : "This page was generated before the floor became adjustable — rebuild it to enable.";
+  }
+  if(mo) mo.textContent=String(MIN_DET);
+  const dd=document.getElementById("minDetDefault"); if(dd) dd.textContent=String(meta.min_detections||5);
+  minDetNote();
+}
+// State the actual cost of the current floor, so the number is never abstract.
+function minDetNote(){
+  const el=document.getElementById("minDetNote"); if(!el) return;
+  if(!PHEN){ el.textContent="Not adjustable on this page — no per-morning detection times in the payload."; return; }
+  const cur=summaryAt(MIN_DET), base=summaryAt(meta.min_detections||5);
+  const on = r => r.filter(x=>x.onset!=null);
+  const sp = r => new Set(on(r).map(x=>x.name)).size;
+  const d = on(cur).length - on(base).length, ds = sp(cur)-sp(base);
+  el.innerHTML = `At ${MIN_DET}: <b>${on(cur).length}</b> of ${cur.length} (species, morning) pairs get an onset, `+
+    `covering <b>${sp(cur)}</b> species` +
+    (d ? ` &mdash; ${d>0?"+":""}${d} pairs and ${ds>0?"+":""}${ds} species versus the build default of ${meta.min_detections||5}.` : `.`);
 }
 const seg=document.getElementById("xmodeSeg");
 if(seg) seg.addEventListener("click", e=>{
@@ -1772,6 +1903,14 @@ document.getElementById("autoCollapse").addEventListener("change", e=>{
       if(!(c.dataset.card in CARDS)) c.classList.remove("collapsed"); });
   renderAll();
 });
+// Live while dragging: the whole point is to watch which species appear and disappear.
+(()=>{ const md=document.getElementById("minDet"); if(!md) return;
+  md.addEventListener("input", ()=>{
+    const v=+md.value;
+    document.getElementById("minDetOut").textContent=String(v);
+    setMinDet(v); minDetNote(); renderAll();
+  });
+})();
 document.getElementById("expandAll").addEventListener("click", ()=>{
   document.querySelectorAll(".card[data-card]").forEach(c=>setCollapsed(c.dataset.card, false, true));
   renderAll(); });

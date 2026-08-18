@@ -104,6 +104,19 @@ def build_payload(det_all: pd.DataFrame, lat: float, lon: float, tz: str,
         dets_by_day[str(d)] = [[round(float(a), 2), lsp[sp], round(float(c), 2)]
                                for sp, a, c in zip(g["common_name"], g[acol], g["confidence"])]
 
+    # Raw in-window detection times per (morning, species) from the CHARTED set, so the
+    # viewer can recompute onset/offset/peak/occupancy at any detection floor instead of
+    # inheriting the one this build happened to use. Built from `win`, never by re-filtering
+    # `dets` on its rounded confidence -- that would silently admit a 0.3996 as a 0.40.
+    phen_species = sorted(win["common_name"].unique().tolist())
+    psp = {s: i for i, s in enumerate(phen_species)}
+    phen = {}
+    for (d, sp), g in win.groupby(["date", "common_name"]):
+        # 3dp: onset interpolates between two of these, so their rounding error lands
+        # straight in the reported number (2dp moved it by up to 3 seconds).
+        phen.setdefault(str(d), {})[psp[sp]] = [round(float(v), 3)
+                                                for v in sorted(g[acol].tolist())]
+
     valid = ms.dropna(subset=["onset_min"])
     earliest = None
     if not valid.empty:
@@ -147,7 +160,11 @@ def build_payload(det_all: pd.DataFrame, lat: float, lon: float, tz: str,
         "top_species": [s for s in totals.index if s in heat_set],
         "earliest": earliest,
         "label_species": label_species,
+        "phen_species": phen_species,
+        "min_detections": int(cfg["min_detections_per_morning"]),
+        "onset_quantile": float(cfg["onset_quantile"]),
         "recorders": _recorder_meta(det),
     }
     return {"meta": meta, "summary": summary, "counts": counts, "day_keys": day_keys,
-            "dets": dets_by_day, "weather": wx_by_day, "dawn": dawn_by_day}
+            "dets": dets_by_day, "weather": wx_by_day, "dawn": dawn_by_day,
+            "phen": phen}

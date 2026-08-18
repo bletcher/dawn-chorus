@@ -46,3 +46,10 @@ jobs:
       # go stale relative to the template it was generated from.
       - name: Check the committed viewer's JavaScript
         run: python tools/check_js.py site/index.html
+
+      # The page recomputes onset/offset/peak/occupancy itself now (the detection floor is
+      # adjustable), so there are two implementations of dawnchorus.phenology and only one
+      # of them is on screen. tests/test_phenology_parity.py checks a freshly built page;
+      # this checks the COMMITTED one, which is what visitors actually get.
+      - name: Check the committed viewer's phenology matches Python
+        run: node tools/check_phen.js site/index.html --payload site/data/montague.json
