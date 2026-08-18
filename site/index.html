@@ -187,6 +187,17 @@
   .conflbl output{font-family:var(--mono,ui-monospace,monospace); font-size:12px;
     color:var(--ink); min-width:2.4em; text-align:right}
   .confcount{font-size:12px; color:var(--muted); white-space:nowrap}
+  /* Every species boxed on the clip, not just the one it was centred on. */
+  .clipsp{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:9px; min-height:26px}
+  .clipsp .lbl{font-size:12px; color:var(--muted); margin-right:1px}
+  .spchip{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; line-height:1;
+    padding:5px 9px; border:1px solid var(--line); border-radius:999px; background:var(--surface);
+    color:var(--ink); cursor:pointer; white-space:nowrap}
+  .spchip:hover{border-color:var(--accent)}
+  .spchip .dot{width:8px; height:8px; border-radius:50%; background:var(--muted); flex:none}
+  .spchip .c{color:var(--muted); font-variant-numeric:tabular-nums; font-size:11.5px}
+  .spchip.anchor{border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent)}
+  .clipsp .none{font-size:12.5px; color:var(--muted)}
   .audioinfo{font-size:13px; color:var(--ink2); margin-top:9px; min-height:18px}
   .audioinfo .mono{font-family:ui-monospace,"SFMono-Regular",Menlo,monospace; font-size:12px}
   .listen{cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px}
@@ -284,6 +295,7 @@
         </label>
         <span class="confcount" id="labelConfCount"></span>
       </div>
+      <div class="clipsp" id="clipSpecies"></div>
     </div>
     <div class="audioinfo" id="audioInfo"></div>
     <div class="audioset">
@@ -608,7 +620,8 @@ let actx=null, srcNode=null, playRAF=null, cur=null;
 function secToClock(sec){ sec=Math.max(0,Math.round(sec)); const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s=sec%60;
   return [h,m,s].map(v=>String(v).padStart(2,"0")).join(":"); }
 function setAudioInfo(html){ const e=document.getElementById("audioInfo"); if(e) e.innerHTML=html; }
-function showSpec(on){ const w=document.getElementById("specWrap"); if(w) w.hidden=!on; }
+function showSpec(on){ const w=document.getElementById("specWrap"); if(w) w.hidden=!on;
+  if(!on) listClipSpecies([]); }
 
 function audioUrl(name){ return ABASE.replace(/\/+$/,"") + "/" + encodeURIComponent(name); }
 async function getBytes(name, s, e){                       // e inclusive; local picked File, else served fetch
@@ -676,7 +689,7 @@ function drawSpec(samples, sr){
 function renderClip(){ if(cur && cur.clip){ drawSpec(cur.clip.samples, cur.clip.sampleRate); drawLabels(); } }
 let LABEL_MIN = 0.25;                     // live threshold for the label boxes
 function drawLabels(){                                     // BirdNET 3s detections boxed + named over the clip
-  if(!cur || !cur.file || !DETS[cur.day]) return;
+  if(!cur || !cur.file || !DETS[cur.day]){ listClipSpecies([]); return; }
   const canvas=document.getElementById("spec"), ctx=canvas.getContext("2d"), W=canvas.width, H=canvas.height;
   const f=cur.file, startOff=cur.startOff, dawnSec=DAWN[cur.day], SEG=3, dark=specMode!=="bw";
 
@@ -708,7 +721,10 @@ function drawLabels(){                                     // BirdNET 3s detecti
   });
   rows.sort((a,b)=>a.ft-b.ft);
   const cnt=document.getElementById('labelConfCount');
-  if(cnt) cnt.textContent = inClip ? `${rows.length} box${rows.length===1?'':'es'} · ${new Set(rows.map(r=>r.si)).size} species of ${inClip} detection${inClip===1?'':'s'} in view` : 'no detections in view';
+  const hidden=inClip-rows.reduce((s,r)=>s+r.n,0);
+  if(cnt) cnt.textContent = !inClip ? 'no detections in view'
+    : `${rows.length} box${rows.length===1?'':'es'} in view` + (hidden>0 ? ` · ${hidden} below the floor` : '');
+  listClipSpecies(rows);
 
   // The 3s analysis grid. BirdNET scores whole windows on this fixed lattice, so a
   // call is judged by the window it lands in, not by where it starts. Showing the
@@ -734,6 +750,42 @@ function drawLabels(){                                     // BirdNET 3s detecti
     ctx.fillStyle=dark?"rgba(0,0,0,.6)":"rgba(255,255,255,.82)";
     ctx.fillRect(x1, ly, Math.min(tw+8, W-x1), 14);
     ctx.fillStyle=dark?"#fff":"#111"; ctx.fillText(lab, x1+4, ly+1); });
+}
+
+// Name EVERY species boxed on this clip, not just the one the clip was centred on.
+// Fed the same `rows` the boxes are drawn from, so the text and the spectrogram cannot
+// disagree -- previously this line named only the anchor detection, which made a clip
+// holding four singers read as one.
+function listClipSpecies(rows){
+  const el=document.getElementById("clipSpecies"); if(!el) return;
+  if(!rows.length){
+    el.innerHTML = cur && cur.clip ? '<span class="none">No species above the label threshold in this clip.</span>' : "";
+    return; }
+  const bySp=new Map();                                    // first appearance order == listening order
+  rows.forEach(r=>{ const e=bySp.get(r.si);
+    if(e){ e.c=Math.max(e.c,r.c); e.n+=r.n; } else bySp.set(r.si, {si:r.si, c:r.c, n:r.n}); });
+  const items=[...bySp.values()];
+  el.innerHTML = `<span class="lbl">In this clip:</span>` + items.map(s=>{
+    const nm=LABELSP[s.si], col=colorFor[nm];
+    return `<button type="button" class="spchip${s.si===(cur&&cur.anchorSi)?" anchor":""}" data-sp="${esc(nm)}"`
+         + ` title="${esc(nm)} — ${s.n} detection${s.n===1?"":"s"} here, best ${s.c.toFixed(2)}. Click to step through this species.">`
+         + `<i class="dot"${col?` style="background:${col}"`:""}></i>${esc(nm)}`
+         + `<span class="c">${s.c.toFixed(2)}${s.n>1?` ×${s.n}`:""}</span></button>`;
+  }).join("");
+  el.querySelectorAll(".spchip").forEach(b=> b.onclick=()=>jumpToSpecies(b.dataset.sp));
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// Clicking a species in the list moves to ITS nearest call, not the day's loudest one --
+// you are asking "what else is singing here", so "here" has to be preserved.
+async function jumpToSpecies(name){
+  if(!cur) return;
+  const si=LABELSP.indexOf(name), list=distinctDets(cur.day).filter(d=>d[1]===si);
+  if(!list.length) return;
+  const here=(cur.startOff + cur.file.s - DAWN[cur.day]) / 60 + CLIP_SEC/120;   // clip centre, min from dawn
+  let pos=0, best=Infinity;
+  list.forEach((d,i)=>{ const diff=Math.abs(d[0]-here); if(diff<best){ best=diff; pos=i; } });
+  await loadAt(cur.day, list, pos);
 }
 
 function playClip(){ if(!cur||!cur.clip) return;
@@ -766,14 +818,16 @@ async function loadAt(day, list, pos){                        // load + draw lis
   if(!files || dawnSec==null){ setAudioInfo(`No recording for ${day}.`); showSpec(false); return; }
   const abs=dawnSec + t*60, f=files.find(x=>x.d!=null && abs>=x.s && abs<x.s+x.d) || files.find(x=>abs>=x.s) || files[0];
   const startOff=Math.max(0, (abs - f.s) - CLIP_SEC/2);
-  cur={day, list, pos, file:f, startOff};
+  cur={day, list, pos, file:f, startOff, anchorSi:e[1]};   // anchorSi: the call we navigated TO
   setAudioInfo(`loading… <span class="mono">${f.name}</span>`);
   try{ cur.clip=await loadPcm(f.name, startOff, CLIP_SEC);
     showSpec(true); renderClip();
     document.getElementById("detIdx").textContent=`${pos+1}/${list.length}`;
     document.getElementById("prevDet").disabled=pos<=0;
     document.getElementById("nextDet").disabled=pos>=list.length-1;
-    setAudioInfo(`<strong>${name}</strong> ${c.toFixed(2)} · ${secToClock(abs)} local · ${Math.round(t)} min from dawn · <span class="mono">${f.name}</span>`);
+    // "Centred on", not just the name: the clip routinely holds other singers, and the
+    // bare name read as a claim that this was the only bird in it.
+    setAudioInfo(`Centred on <strong>${name}</strong> ${c.toFixed(2)} · ${secToClock(abs)} local · ${Math.round(t)} min from dawn · <span class="mono">${f.name}</span>`);
   }catch(err){ showSpec(false); setAudioInfo(audioErr(err)); } }
 
 function audioErr(e){ return `Couldn't load audio (${e.message}). Pick your recordings folder below, or run <code>python tools/serve.py</code> and open <code>/site/</code>.`; }
