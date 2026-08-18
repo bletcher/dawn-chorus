@@ -63,11 +63,6 @@
   .setrow > b{font-size:13px}
   .setrow label{display:flex; gap:8px; align-items:flex-start; font-size:13.5px; cursor:pointer}
   .setrow small{color:var(--muted); display:block; font-size:12px; line-height:1.45}
-  .setslider{flex-direction:column; gap:8px; cursor:default}
-  .setslider-ctl{display:flex; align-items:center; gap:10px; width:100%}
-  .setslider-ctl input[type=range]{flex:1; accent-color:var(--accent); cursor:pointer}
-  .setslider-ctl output{font-variant-numeric:tabular-nums; font-weight:700; font-size:13px;
-    min-width:2ch; text-align:right; color:var(--ink)}
   #minDetNote{margin:2px 0 0; color:var(--ink2)}
   .modal{position:fixed; inset:0; z-index:50; display:flex; align-items:flex-start; justify-content:center;
     padding:44px 16px; background:rgba(9,13,20,.55); overflow:auto}
@@ -94,8 +89,10 @@
   .tile .k{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em}
   .tile .v{font-size:26px; font-weight:600; margin-top:3px; font-variant-numeric:tabular-nums}
   .tile .v small{font-size:13px; color:var(--ink2); font-weight:500}
-  /* Column of rows: each control group gets its own line with a matching eyebrow label,
-     so "Time axis" reads as a peer of "Time scope" rather than one more inline control. */
+  /* Column of rows: one line per control group, each with a matching eyebrow label.
+     Only controls whose effect you WATCH live here -- time scope and the detection floor.
+     The time axis moved to Settings: it is a fixed preference, set once, and a permanent
+     seat in a sticky bar is expensive real estate for something touched twice a year. */
   .scopebar{position:sticky; top:0; z-index:20; display:flex; flex-direction:column;
     align-items:stretch; gap:10px;
     background:var(--scope); border:1px solid var(--line); border-radius:11px;
@@ -105,19 +102,15 @@
     color:var(--muted); font-weight:600; min-width:78px}
   .periodlabel{font-size:14px; color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap}
   .scopehint{margin-left:auto; font-size:12px; color:var(--muted)}
+  /* The live cost of the current floor, beside the number that sets it -- the whole reason
+     this control is in the toolbar rather than buried in Settings. */
+  .mdcount{font-size:12.5px; color:var(--ink2); font-variant-numeric:tabular-nums; white-space:nowrap}
+  .mdcount b{color:var(--ink)}
+  .mdcount .delta{color:var(--dawn); font-weight:600}
   label.ctl{font-size:13px; color:var(--ink2); display:flex; align-items:center; gap:7px}
   label.ctl.grow{flex:1; min-width:220px}
   select{font:inherit; font-size:13px; padding:5px 8px; border-radius:7px; border:1px solid var(--line); background:var(--surface); color:var(--ink)}
-  /* Segmented control: two mutually exclusive states, so it reads as one control with a
-     current position rather than two independent buttons. */
-  .seg{display:inline-flex; border:1px solid var(--line); border-radius:7px; overflow:hidden;
-    background:var(--surface)}
-  .seg button{font:inherit; font-size:12.5px; padding:5px 10px; border:0; cursor:pointer;
-    background:transparent; color:var(--ink2); white-space:nowrap}
-  .seg button + button{border-left:1px solid var(--line)}
-  .seg button:hover:not([aria-pressed="true"]):not(:disabled){background:var(--scope); color:var(--ink)}
-  .seg button[aria-pressed="true"]{background:var(--accent); color:#fff; font-weight:600}
-  .seg button:disabled{opacity:.4; cursor:not-allowed}
+  .setrow label:has(input:disabled){opacity:.5; cursor:not-allowed}
   .pstep{font:inherit; font-size:15px; line-height:1; padding:3px 9px; cursor:pointer;
     background:var(--surface); color:var(--ink2); border:1px solid var(--line);
     border-radius:6px; flex:none}
@@ -273,12 +266,15 @@
       <span class="scopehint">scopes every chart below</span>
     </div>
     <div class="scoperow">
-      <span class="eyebrow">Time&nbsp;axis</span>
-      <span class="seg" id="xmodeSeg" role="group" aria-label="Time axis">
-        <button type="button" data-xmode="dawn" aria-pressed="true">from dawn</button>
-        <button type="button" data-xmode="clock" aria-pressed="false">clock</button>
-      </span>
-      <span class="scopehint">x-axis on the morning-profile charts</span>
+      <span class="eyebrow">Detection&nbsp;floor</span>
+      <label class="ctl grow">Min&nbsp;per&nbsp;morning
+        <button type="button" class="pstep" id="mdPrev" aria-label="lower the floor" title="lower the floor">&lsaquo;</button>
+        <input type="range" id="minDet" min="1" max="20" step="1" value="5" aria-label="Minimum detections per morning">
+        <button type="button" class="pstep" id="mdNext" aria-label="raise the floor" title="raise the floor">&rsaquo;</button>
+      </label>
+      <span class="periodlabel"><output id="minDetOut">5</output></span>
+      <span class="mdcount" id="minDetCount"></span>
+      <span class="scopehint">a morning needs this many to get an onset</span>
     </div>
   </div>
 
@@ -472,17 +468,12 @@
 
     <div class="setrow">
       <b>Detection floor</b>
-      <label class="setslider"><span>Minimum detections per morning
-          <small>A species needs this many detections in one morning's window before that
-            morning gets an onset. Below it the morning still counts toward totals and
-            presence, but contributes no phenology &mdash; and a species with no qualifying
-            morning drops out of <em>Who sings when</em>, the cumulative curves and the
-            seasonal trend entirely. Changing it recomputes every chart on this page.</small></span>
-        <span class="setslider-ctl">
-          <input type="range" id="minDet" min="1" max="20" step="1" value="5">
-          <output id="minDetOut">5</output>
-        </span>
-      </label>
+      <p class="fine" style="margin:0">The <b>Minimum detections per morning</b> slider is in the
+        toolbar, next to Time scope, because its effect is the thing worth watching: a species
+        needs this many detections in one morning's window before that morning gets an onset, and
+        a species with no qualifying morning leaves <em>Who sings when</em>, the cumulative curves
+        and the seasonal trend entirely. Below the floor a morning still counts toward totals and
+        presence &mdash; it just contributes no phenology.</p>
       <p class="fine" id="minDetNote"></p>
       <p class="fine">Caution: onset is the 5th percentile of detection times, and with fewer
         than 21 detections that percentile is an interpolation between the two earliest
@@ -1549,18 +1540,15 @@ function setXMode(mode){
   SETTINGS.xmode = mode; saveSettings(); applySettings(); renderAll();
 }
 
-// The toolbar control and the Settings dialog drive the SAME state, so both are repainted
-// from SETTINGS rather than from whichever one was clicked.
+// One repaint for every control, driven from state rather than from whichever widget was
+// touched -- the floor has a toolbar slider AND a readout in Settings, and they must never
+// disagree about what the current floor is.
 function applySettings(){
   document.querySelectorAll('input[name="xmode"]').forEach(r=>{
     r.checked = r.value===SETTINGS.xmode;
-    if(r.value==="clock" && !CAN_CLOCK) r.disabled = true;
-  });
-  document.querySelectorAll('#xmodeSeg button').forEach(b=>{
-    b.setAttribute("aria-pressed", String(b.dataset.xmode===SETTINGS.xmode));
-    if(b.dataset.xmode==="clock" && !CAN_CLOCK){
-      b.disabled = true;
-      b.title = "Needs civil-dawn times — regenerate this page to enable clock time";
+    if(r.value==="clock" && !CAN_CLOCK){
+      r.disabled = true;
+      const l=r.closest("label"); if(l) l.title="Needs civil-dawn times — regenerate this page to enable clock time";
     }
   });
   const ac=document.getElementById("autoCollapse"); if(ac) ac.checked = !!SETTINGS.autoCollapse;
@@ -1570,25 +1558,32 @@ function applySettings(){
   }
   if(mo) mo.textContent=String(MIN_DET);
   const dd=document.getElementById("minDetDefault"); if(dd) dd.textContent=String(meta.min_detections||5);
-  minDetNote();
+  syncMinDet();
 }
-// State the actual cost of the current floor, so the number is never abstract.
-function minDetNote(){
-  const el=document.getElementById("minDetNote"); if(!el) return;
-  if(!PHEN){ el.textContent="Not adjustable on this page — no per-morning detection times in the payload."; return; }
-  const cur=summaryAt(MIN_DET), base=summaryAt(meta.min_detections||5);
+// The cost of the current floor, live, in two places: short-form beside the slider (which
+// is the point of putting it in the toolbar) and long-form in Settings.
+function syncMinDet(){
+  const a=document.getElementById("mdPrev"), b=document.getElementById("mdNext"),
+        md=document.getElementById("minDet");
+  if(a&&b&&md){ const v=+md.value;
+    a.disabled = md.disabled || v<=+md.min; b.disabled = md.disabled || v>=+md.max; }
+  const brief=document.getElementById("minDetCount"), full=document.getElementById("minDetNote");
+  if(!PHEN){
+    if(brief) brief.textContent="";
+    if(full) full.textContent="Not adjustable on this page — no per-morning detection times in the payload.";
+    return; }
+  const def=meta.min_detections||5;
   const on = r => r.filter(x=>x.onset!=null);
   const sp = r => new Set(on(r).map(x=>x.name)).size;
-  const d = on(cur).length - on(base).length, ds = sp(cur)-sp(base);
-  el.innerHTML = `At ${MIN_DET}: <b>${on(cur).length}</b> of ${cur.length} (species, morning) pairs get an onset, `+
-    `covering <b>${sp(cur)}</b> species` +
-    (d ? ` &mdash; ${d>0?"+":""}${d} pairs and ${ds>0?"+":""}${ds} species versus the build default of ${meta.min_detections||5}.` : `.`);
+  const cur=summaryAt(MIN_DET), base=summaryAt(def);
+  const np=on(cur).length, ns=sp(cur), dp=np-on(base).length, ds=ns-sp(base);
+  const sign = n => (n>0?"+":"")+n;
+  if(brief) brief.innerHTML = `<b>${ns}</b> species · <b>${np}</b> onsets` +
+    (dp||ds ? ` <span class="delta">(${sign(ds)} sp, ${sign(dp)} onsets vs ${def})</span>` : "");
+  if(full) full.innerHTML = `At ${MIN_DET}: <b>${np}</b> of ${cur.length} (species, morning) pairs get an `+
+    `onset, covering <b>${ns}</b> species` +
+    (dp||ds ? ` &mdash; ${sign(dp)} pairs and ${sign(ds)} species versus the build default of ${def}.` : `.`);
 }
-const seg=document.getElementById("xmodeSeg");
-if(seg) seg.addEventListener("click", e=>{
-  const b=e.target.closest("button[data-xmode]");
-  if(b && !b.disabled) setXMode(b.dataset.xmode);
-});
 document.querySelectorAll('input[name="xmode"]').forEach(r=> r.addEventListener("change", ()=>{
   if(r.checked) setXMode(r.value);
 }));
@@ -1599,13 +1594,18 @@ document.getElementById("autoCollapse").addEventListener("change", e=>{
       if(!(c.dataset.card in CARDS)) c.classList.remove("collapsed"); });
   renderAll();
 });
-// Live while dragging: the whole point is to watch which species appear and disappear.
+// Live while dragging: the whole point of the toolbar seat is watching species appear and
+// disappear as the floor moves, so this redraws on `input`, not on `change`.
 (()=>{ const md=document.getElementById("minDet"); if(!md) return;
-  md.addEventListener("input", ()=>{
-    const v=+md.value;
+  const apply=v=>{ v=Math.max(+md.min, Math.min(+md.max, v));
+    if(v===MIN_DET) return;
+    md.value=String(v);
     document.getElementById("minDetOut").textContent=String(v);
-    setMinDet(v); minDetNote(); renderAll();
-  });
+    setMinDet(v); syncMinDet(); renderAll(); };
+  md.addEventListener("input", ()=>apply(+md.value));
+  const p=document.getElementById("mdPrev"), n=document.getElementById("mdNext");
+  if(p) p.onclick=()=>apply(MIN_DET-1);
+  if(n) n.onclick=()=>apply(MIN_DET+1);
 })();
 document.getElementById("expandAll").addEventListener("click", ()=>{
   document.querySelectorAll(".card[data-card]").forEach(c=>setCollapsed(c.dataset.card, false, true));
