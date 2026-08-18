@@ -323,12 +323,14 @@
     <div class="chbody">
       <section class="card" data-card="overview">
         <h2 class="display">Calls by species</h2>
-        <p class="lead">Every species detected in the <span class="tag">scoped period</span>, ranked by
-          number of detections. The axis is linear, so bar length is directly comparable &mdash; which is
-          why the tail looks thin: a few species really do account for most of what the recorder hears.
-          Counts are detections above the confidence floor, not individual birds, so a species that
-          repeats itself outranks one that calls once from three directions.</p>
+        <p class="lead">Species in the <span class="tag">scoped period</span> ranked by number of
+          detections, showing the same set as <em>Who sings when</em> below so the two charts agree on
+          which birds are present. The axis is linear, so bar length is directly comparable &mdash; which
+          is why the tail looks thin: a few species really do account for most of what the recorder
+          hears. Counts are detections above the confidence floor, not individual birds, so a species
+          that repeats itself outranks one that calls once from three directions.</p>
         <div class="plot" id="chart-overview"></div>
+        <p class="tblnote" id="ovNote"></p>
       </section>
     </div>
   </section>
@@ -1022,14 +1024,23 @@ function aggBySpecies(S){ const set=new Set(S), g={};
 // median over the full record, 76% of species under 2% of the longest bar). A log axis
 // would make every bar visible, but bar length would stop being proportional to the count
 // -- and the skew is the finding, not an obstacle to it.
+let overviewShowAll = false;
 function renderOverview(S){
   const el=document.getElementById("chart-overview"); el.innerHTML="";
   const g=aggBySpecies(S);
-  const rows=Object.keys(g).map(name=>({name, n:g[name].reduce((s,r)=>s+r.n,0),
-                                        mornings:g[name].length}))
+  // `charted` is exactly renderTimeline's admission test -- a species is in "Who sings
+  // when" only if some scoped morning gave it an onset, which needs >=5 detections inside
+  // the window that morning. Deriving it the same way here is what keeps the two charts
+  // from disagreeing about which birds exist.
+  const all=Object.keys(g).map(name=>({name, n:g[name].reduce((s,r)=>s+r.n,0),
+                                       mornings:g[name].length,
+                                       charted:g[name].some(r=>r.onset!=null)}))
     .filter(d=>d.n>0)
     .sort((a,b)=> b.n-a.n || a.name.localeCompare(b.name));   // ties resolve stably, not randomly
-  if(!rows.length){ el.innerHTML='<p class="empty">No detections in this period.</p>'; return; }
+  const sparse=all.filter(d=>!d.charted);
+  const rows=overviewShowAll ? all : all.filter(d=>d.charted);
+  overviewNote(all, sparse, rows, S);
+  if(!rows.length){ el.innerHTML='<p class="empty">No species cleared the onset threshold in this period.</p>'; return; }
   const names=rows.map(d=>d.name), total=rows.reduce((s,d)=>s+d.n,0);
   // Fit the gutter to the longest name actually shown. The shared ML() is a flat 172px,
   // which clips the long ones ("Black-throated Green Warbler" needs ~195px) -- and a
@@ -1051,6 +1062,26 @@ function renderOverview(S){
         `${d.name}\n${d.n.toLocaleString()} detections — ${fmt(100*d.n/total,1)}% of ${total.toLocaleString()}\n`+
         `heard on ${d.mornings} of ${S.length} morning${S.length===1?"":"s"}`}))
     ]}));
+}
+
+// The held-back species are stated, never just absent. At a daily scope the onset floor
+// is severe -- on a quiet morning it can drop a third of the detections -- so the note
+// carries the actual cost and a way to undo it, rather than leaving a thin chart looking
+// like a thin morning.
+function overviewNote(all, sparse, rows, S){
+  const note=document.getElementById("ovNote"); if(!note) return;
+  if(!sparse.length){ note.textContent = `${rows.length} species — every one also appears in “Who sings when”.`; return; }
+  const lost=sparse.reduce((s,d)=>s+d.n,0), tot=all.reduce((s,d)=>s+d.n,0);
+  note.innerHTML = overviewShowAll
+    ? `All ${all.length} species detected, including ${sparse.length} too sparse for an onset `+
+      `(never 5 detections in one morning) and so absent from “Who sings when”. `+
+      `<button type="button" id="ovToggle">Match “Who sings when”</button>`
+    : `${rows.length} species — the same set as “Who sings when”. ${sparse.length} more were `+
+      `detected but never reached 5 detections in a single morning, so they have no onset: `+
+      `${lost.toLocaleString()} detection${lost===1?"":"s"}, ${fmt(100*lost/tot,1)}% of the period. `+
+      `<button type="button" id="ovToggle">Show all</button>`;
+  const b=document.getElementById("ovToggle");
+  if(b) b.onclick=()=>{ overviewShowAll=!overviewShowAll; renderOverview(scopedDays()); renderFindings(scopedDays()); };
 }
 
 function renderTimeline(S){
@@ -1352,8 +1383,10 @@ function renderFindings(S){
 
   // Overview: the concentration IS the finding, so state it rather than leaving the reader
   // to estimate it off bar lengths.
-  const cnt=Object.keys(g).map(n=>({n, det:g[n].reduce((s,r)=>s+r.n,0)}))
-                          .filter(d=>d.det>0).sort((a,b)=>b.det-a.det);
+  const cnt=Object.keys(g).map(n=>({n, det:g[n].reduce((s,r)=>s+r.n,0),
+                                    charted:g[n].some(r=>r.onset!=null)}))
+                          .filter(d=>d.det>0 && (overviewShowAll || d.charted))
+                          .sort((a,b)=>b.det-a.det);
   if(cnt.length){
     const tot=cnt.reduce((s,d)=>s+d.det,0), top5=cnt.slice(0,5).reduce((s,d)=>s+d.det,0);
     put("overview", `${cnt.length} species, ${tot.toLocaleString()} detections over `+
