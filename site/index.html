@@ -313,6 +313,26 @@
 
   <div class="chapters">
 
+  <section class="chapter" id="ch-overview">
+    <div class="rail">
+      <span class="chwhen">the whole period</span>
+      <h2 class="chtitle">Overview</h2>
+      <p class="chq">Who is heard most, and how much of the chorus is a handful of species?</p>
+      <p class="chfind" id="find-overview"></p>
+    </div>
+    <div class="chbody">
+      <section class="card" data-card="overview">
+        <h2 class="display">Calls by species</h2>
+        <p class="lead">Every species detected in the <span class="tag">scoped period</span>, ranked by
+          number of detections. The axis is linear, so bar length is directly comparable &mdash; which is
+          why the tail looks thin: a few species really do account for most of what the recorder hears.
+          Counts are detections above the confidence floor, not individual birds, so a species that
+          repeats itself outranks one that calls once from three directions.</p>
+        <div class="plot" id="chart-overview"></div>
+      </section>
+    </div>
+  </section>
+
   <section class="chapter" id="ch-morning">
     <div class="rail">
       <span class="chwhen">dawn &minus;2h</span>
@@ -994,6 +1014,45 @@ function aggBySpecies(S){ const set=new Set(S), g={};
   summary.forEach(r=>{ if(set.has(r.date)){ (g[r.name] || (g[r.name]=[])).push(r); } });
   return g; }
 
+// Ranked magnitude across named categories. Bars run along x with species stacked down y
+// rather than as columns: names like "Ruby-throated Hummingbird" cannot be read under a
+// column, and the scoped period can hold 70+ of them.
+//
+// The axis stays LINEAR even though the data is severely skewed (top species 206x the
+// median over the full record, 76% of species under 2% of the longest bar). A log axis
+// would make every bar visible, but bar length would stop being proportional to the count
+// -- and the skew is the finding, not an obstacle to it.
+function renderOverview(S){
+  const el=document.getElementById("chart-overview"); el.innerHTML="";
+  const g=aggBySpecies(S);
+  const rows=Object.keys(g).map(name=>({name, n:g[name].reduce((s,r)=>s+r.n,0),
+                                        mornings:g[name].length}))
+    .filter(d=>d.n>0)
+    .sort((a,b)=> b.n-a.n || a.name.localeCompare(b.name));   // ties resolve stably, not randomly
+  if(!rows.length){ el.innerHTML='<p class="empty">No detections in this period.</p>'; return; }
+  const names=rows.map(d=>d.name), total=rows.reduce((s,d)=>s+d.n,0);
+  // Fit the gutter to the longest name actually shown. The shared ML() is a flat 172px,
+  // which clips the long ones ("Black-throated Green Warbler" needs ~195px) -- and a
+  // clipped species name is worse than a slightly narrower plot.
+  const longest=Math.max(...names.map(n=>spName(n,el).length));
+  const gutter = W(el)<520 ? ML(el,true) : Math.min(230, Math.max(172, longest*6.4+14));
+  // Single measure, single fill: length carries magnitude, so colouring by it too would
+  // encode one variable twice and imply a second dimension that isn't there.
+  el.append(Plot.plot({ width:W(el), height:names.length*19+62, marginLeft:gutter,
+    marginRight:56, style:plotStyle(),
+    x:{label:"detections →", grid:true, nice:true},
+    y:{domain:names, label:null, tickFormat:n=>spName(n,el)},
+    marks:[
+      Plot.barX(rows, {x:"n", y:"name", fill:css("--accent"), rx:3, insetTop:3, insetBottom:3}),
+      Plot.ruleX([0], {stroke:css("--line")}),
+      Plot.text(rows, {x:"n", y:"name", text:d=>d.n.toLocaleString(), dx:6, textAnchor:"start",
+        fill:css("--muted"), fontSize:10}),
+      Plot.tip(rows, Plot.pointerY({x:"n", y:"name", title:d=>
+        `${d.name}\n${d.n.toLocaleString()} detections — ${fmt(100*d.n/total,1)}% of ${total.toLocaleString()}\n`+
+        `heard on ${d.mornings} of ${S.length} morning${S.length===1?"":"s"}`}))
+    ]}));
+}
+
 function renderTimeline(S){
   const el=document.getElementById("chart-timeline"); el.innerHTML="";
   const g=aggBySpecies(S);
@@ -1290,6 +1349,19 @@ function buildChips(){
 function renderFindings(S){
   const put=(id,html)=>{ const el=document.getElementById("find-"+id); if(el) el.innerHTML=html||""; };
   const g=aggBySpecies(S);
+
+  // Overview: the concentration IS the finding, so state it rather than leaving the reader
+  // to estimate it off bar lengths.
+  const cnt=Object.keys(g).map(n=>({n, det:g[n].reduce((s,r)=>s+r.n,0)}))
+                          .filter(d=>d.det>0).sort((a,b)=>b.det-a.det);
+  if(cnt.length){
+    const tot=cnt.reduce((s,d)=>s+d.det,0), top5=cnt.slice(0,5).reduce((s,d)=>s+d.det,0);
+    put("overview", `${cnt.length} species, ${tot.toLocaleString()} detections over `+
+      `${S.length} morning${S.length===1?"":"s"}. ${cnt[0].n} leads with `+
+      `${cnt[0].det.toLocaleString()} (${fmt(100*cnt[0].det/tot,0)}%); the top `+
+      `${Math.min(5,cnt.length)} account for ${fmt(100*top5/tot,0)}% of everything heard.`);
+  } else put("overview","");
+
   const rows=Object.keys(g).map(n=>{ const rs=g[n].filter(r=>r.onset!=null);
     return rs.length ? {n, onset:median(rs.map(r=>r.onset)), det:rs.reduce((s,r)=>s+r.n,0)} : null;
   }).filter(Boolean).sort((a,b)=>a.onset-b.onset);
@@ -1320,7 +1392,7 @@ function renderFindings(S){
 
 function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S);
   setXOffset(S);
-  renderTimeline(S); renderEcdf(S); renderHeat(S); renderSeason();
+  renderOverview(S); renderTimeline(S); renderEcdf(S); renderHeat(S); renderSeason();
   renderWeather(S,"t","chart-temp","temperature at dawn (°C)","temp");
   renderWeather(S,"r","chart-rain","rain over the window (mm)","rain");
   renderTable(S); updateAudioCard(S); renderFindings(S); }
