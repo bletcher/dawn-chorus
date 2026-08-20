@@ -505,23 +505,23 @@ TEMPLATE = r"""<!doctype html>
      dawn amber to daylight. It is the same solar axis every chart is plotted against. */
   .rung::before{content:""; position:absolute; left:-2px; top:0; bottom:0; width:2px;
     background:linear-gradient(180deg, var(--spine-a), var(--spine-b))}
-  .rhead{display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:4px 12px;
-    align-items:baseline; padding:0 0 12px; cursor:pointer; user-select:none;
+  .rhead{display:grid; grid-template-columns:minmax(0,1fr); gap:4px; padding:0 0 12px;
+    cursor:pointer; user-select:none;
     position:sticky; top:calc(var(--barh, 112px) + 4px); z-index:9;
     background:linear-gradient(180deg, var(--bg) 78%, transparent)}
-  .rnum{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace); font-size:10.5px;
-    letter-spacing:.12em; text-transform:uppercase; color:var(--dawn); font-weight:700;
-    border:1px solid var(--dawn); border-radius:99px; padding:2px 8px; white-space:nowrap}
-  .rname{font-size:21px; line-height:1.15; margin:0; letter-spacing:-.01em}
-  .rmark{width:22px; height:22px; display:grid; place-items:center; color:var(--muted);
-    border:1px solid var(--line); border-radius:6px; font-size:11px; line-height:1}
-  .rmark::before{content:"−"}
-  .rung.collapsed .rmark::before{content:"+"}
+  /* Same chevron the cards use, rather than a bordered +/- button: one collapse language
+     for the whole page, and the rung name stays the loudest thing in its header. */
+  .rname{font-size:21px; line-height:1.15; margin:0; letter-spacing:-.01em;
+    display:flex; align-items:center; gap:9px}
+  .rname::before{content:"▾"; font-size:.62em; color:var(--muted); transition:transform .15s;
+    display:inline-block; width:.8em}
+  .rung.collapsed .rname::before{transform:rotate(-90deg)}
+  @media (prefers-reduced-motion:reduce){ .rname::before{transition:none} }
   .rung.collapsed .rbody{display:none}
   .rung.collapsed .rhead{padding-bottom:4px}
   /* The scope sentence is the point of the header: it says what this rung is showing and
      how it relates to the slider, so nobody has to infer it chart by chart. */
-  .rscope{grid-column:2 / -1; font-size:13px; color:var(--muted); margin:0; line-height:1.5;
+  .rscope{font-size:13px; color:var(--muted); margin:0; line-height:1.5;
     font-variant-numeric:tabular-nums}
   .rscope:empty{display:none}
   .rung::after{content:""; position:absolute; left:-7px; top:7px; width:11px; height:11px;
@@ -734,61 +734,22 @@ TEMPLATE = r"""<!doctype html>
 
     <div class="ladder">
 
-  <section class="rung" data-rung="season">
-    <header class="rhead">
-      <span class="rnum">Rung 1</span>
-      <h2 class="rname">Season</h2>
-      <p class="rscope" id="scope-season"></p>
-      <span class="rmark" aria-hidden="true"></span>
-    </header>
-    <div class="rbody">
-      <section class="card" data-card="trend">
-        <h2 class="display">Rolled up <span class="muted" id="trendGrainLabel"></span></h2>
-        <p class="cardq">How much is being heard, and how does that change as the season turns?</p>
-        <p class="chfind" id="find-overview"></p>
-        <p class="lead">The record <em>rolled up</em> &mdash; the one thing the strip at the top cannot
-          show you, since it always draws one bar per morning and never re-buckets. Weeks and months
-          smooth out the morning-to-morning noise that dominates a short record: a single quiet morning
-          is weather, a quiet month is the season turning. Like the strip, this ignores the selection;
-          highlighted bars are the periods the selection touches, and clicking one scopes to it.
-          Counts follow the <span class="tag">detection floor</span> &mdash; a species is counted in a
-          period once it clears the floor on one of that period's mornings, the same test every chart
-          below uses.</p>
-        <div class="controls">
-          <label class="ctl">Roll&nbsp;up&nbsp;by
-            <select id="trendGrain">
-              <option value="week">Week</option>
-              <option value="month">Month</option>
-              <option value="year">Year</option>
-            </select>
-          </label>
-          <span class="mutedhint" id="trendHint"></span>
-        </div>
-        <div class="plot" id="chart-trend"></div>
-      </section>
-      <section class="card" data-card="season">
-        <h2 class="display">Onset through the season</h2>
-        <p class="cardq">Does a species shift earlier or later as the year turns?</p>
-        <p class="chfind" id="find-season"></p>
-        <p class="lead">Each dot is one species on one morning: when it started, against the date.
-          This is the seasonal question &mdash; <em>does a species shift earlier or later as the year
-          turns?</em> Trend lines appear for species with &ge;4 mornings. Unlike the charts above this
-          one ignores the selection and always shows <em>every</em> morning, because a season is
-          what it is measuring.</p>
-        <div class="controls"><div class="msel" id="seasonSel"></div></div>
-        <div class="plot" id="chart-season"></div>
-      </section>
-    </div>
-  </section>
-
   <section class="rung" data-rung="selection">
     <header class="rhead">
-      <span class="rnum">Rung 2</span>
       <h2 class="rname">Selected period</h2>
       <p class="rscope" id="scope-selection"></p>
-      <span class="rmark" aria-hidden="true"></span>
     </header>
     <div class="rbody">
+      <section class="card" data-card="timeline">
+        <h2 class="display">Who sings when</h2>
+        <p class="cardq">Who starts singing, and how long do they keep going?</p>
+        <p class="chfind" id="find-morning"></p>
+        <p class="lead">Each bar spans a species' vocal activity &mdash; onset (5th percentile of detection
+          times) to offset (95th) &mdash; in minutes from <span class="tag">civil dawn</span> (dashed line),
+          taken as the <em>median across the scoped period's mornings</em>. Darker bars are sung more
+          continuously; the tick marks the median busiest minute.</p>
+        <div class="plot" id="chart-timeline"></div>
+      </section>
       <section class="card" data-card="period">
         <h2 class="display">Calls by species</h2>
         <p class="cardq">Who is heard most here, and how much of it is a handful of species?</p>
@@ -801,16 +762,6 @@ TEMPLATE = r"""<!doctype html>
           that repeats itself outranks one that calls once from three directions.</p>
         <div class="plot" id="chart-period"></div>
         <p class="tblnote" id="pdNote"></p>
-      </section>
-      <section class="card" data-card="timeline">
-        <h2 class="display">Who sings when</h2>
-        <p class="cardq">Who starts singing, and how long do they keep going?</p>
-        <p class="chfind" id="find-morning"></p>
-        <p class="lead">Each bar spans a species' vocal activity &mdash; onset (5th percentile of detection
-          times) to offset (95th) &mdash; in minutes from <span class="tag">civil dawn</span> (dashed line),
-          taken as the <em>median across the scoped period's mornings</em>. Darker bars are sung more
-          continuously; the tick marks the median busiest minute.</p>
-        <div class="plot" id="chart-timeline"></div>
       </section>
       <div class="pair">
       <section class="card" data-card="ecdf">
@@ -860,12 +811,55 @@ TEMPLATE = r"""<!doctype html>
     </div>
   </section>
 
+  <section class="rung" data-rung="season">
+    <header class="rhead">
+      <h2 class="rname">Season</h2>
+      <p class="rscope" id="scope-season"></p>
+    </header>
+    <div class="rbody">
+      <section class="card" data-card="trend">
+        <h2 class="display">Rolled up <span class="muted" id="trendGrainLabel"></span></h2>
+        <p class="cardq">How much is being heard, and how does that change as the season turns?</p>
+        <p class="chfind" id="find-overview"></p>
+        <p class="lead">The record <em>rolled up</em> &mdash; the one thing the strip at the top cannot
+          show you, since it always draws one bar per morning and never re-buckets. Weeks and months
+          smooth out the morning-to-morning noise that dominates a short record: a single quiet morning
+          is weather, a quiet month is the season turning. Like the strip, this ignores the selection;
+          highlighted bars are the periods the selection touches, and clicking one scopes to it.
+          Counts follow the <span class="tag">detection floor</span> &mdash; a species is counted in a
+          period once it clears the floor on one of that period's mornings, the same test every chart
+          below uses.</p>
+        <div class="controls">
+          <label class="ctl">Roll&nbsp;up&nbsp;by
+            <select id="trendGrain">
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+              <option value="year">Year</option>
+            </select>
+          </label>
+          <span class="mutedhint" id="trendHint"></span>
+        </div>
+        <div class="plot" id="chart-trend"></div>
+      </section>
+      <section class="card" data-card="season">
+        <h2 class="display">Onset through the season</h2>
+        <p class="cardq">Does a species shift earlier or later as the year turns?</p>
+        <p class="chfind" id="find-season"></p>
+        <p class="lead">Each dot is one species on one morning: when it started, against the date.
+          This is the seasonal question &mdash; <em>does a species shift earlier or later as the year
+          turns?</em> Trend lines appear for species with &ge;4 mornings. Unlike the charts above this
+          one ignores the selection and always shows <em>every</em> morning, because a season is
+          what it is measuring.</p>
+        <div class="controls"><div class="msel" id="seasonSel"></div></div>
+        <div class="plot" id="chart-season"></div>
+      </section>
+    </div>
+  </section>
+
   <section class="rung" data-rung="morning" hidden>
     <header class="rhead">
-      <span class="rnum">Rung 3</span>
       <h2 class="rname">Morning &amp; clip</h2>
       <p class="rscope" id="scope-morning"></p>
-      <span class="rmark" aria-hidden="true"></span>
     </header>
     <div class="rbody">
       <p class="rgate" id="rungGate" hidden></p>
@@ -1667,10 +1661,11 @@ function renderCheapSoon(){
 
   const finish=ev=>{
     if(!mode) return;
-    // A drag under 4px is a click, so a slightly unsteady hand still selects one morning
-    // rather than an accidental two-day range.
-    if(mode==="new" && !moved) setSel(anchor, anchor);
-    if(mode==="pan") setSel(SEL.a, SEL.b);           // re-snap once, at the end
+    // A click picks a morning; only a DRAG pans. Panning used to claim every press inside
+    // the selection, so with the whole record selected there was nowhere left to click --
+    // you had to shrink the window before you could pick a day inside it.
+    if(!moved && (mode==="new" || mode==="pan")) setSel(anchor, anchor);
+    else if(mode==="pan") setSel(SEL.a, SEL.b);      // re-snap once, at the end
     mode=null; host.classList.remove("dragging");
     try{ host.releasePointerCapture(ev.pointerId); }catch(e){}
     clearTimeout(cheapTimer); renderAll(); syncSteppers();

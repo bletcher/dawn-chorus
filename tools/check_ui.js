@@ -66,11 +66,17 @@ function ladder(src) {
   const rungs = [...src.matchAll(/<section class="rung" data-rung="(\w+)"/g)].map(m => m[1]);
   const scopes = [...src.matchAll(/id="scope-(\w+)"/g)].map(m => m[1]);
   const cards = [...src.matchAll(/data-card="([\w-]+)"/g)].map(m => m[1]);
+  // Order-independent: take from the season rung to whatever rung follows it, so a
+  // reordering of the ladder never silently turns these two checks into empty slices.
   const seasonIdx = src.indexOf('data-rung="season"');
-  const selIdx = src.indexOf('data-rung="selection"');
-  const seasonBody = src.slice(seasonIdx, selIdx);
+  const nextIdx = src.indexOf('data-rung=', seasonIdx + 20);
+  const seasonBody = src.slice(seasonIdx, nextIdx > 0 ? nextIdx : src.indexOf("<footer", seasonIdx));
   return [
-    [rungs.join(",") === "season,selection,morning", `rungs are season → selection → morning (got ${rungs})`],
+    // Selection leads because the context strip is pinned above everything and is itself the
+    // overview -- so the ladder below can open on what you are actually looking at.
+    [rungs.join(",") === "selection,season,morning", `rungs are selection → season → morning (got ${rungs})`],
+    [/data-rung="selection"[\s\S]*?data-card="timeline"[\s\S]*?data-card="period"/.test(src),
+      "Who sings when leads the selection rung"],
     [rungs.every(r => scopes.includes(r)), "every rung has a scope sentence element"],
     [cards.length === 9, `all nine cards survive the restructure (got ${cards.length})`],
     [/data-card="season"/.test(seasonBody),
