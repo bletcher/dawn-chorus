@@ -76,6 +76,19 @@ def test_overview_follows_the_floor_and_matches_the_chapter(page):
     assert "disagree" not in r.stdout, r.stdout
 
 
+def test_species_table_lists_everything_the_charts_draw(page):
+    """The table's weak-evidence filter and the detection floor count different things.
+
+    The filter counts detections across the whole period; the floor counts detections in a
+    single morning. Below a floor of 3 they disagree -- a species can earn an onset off two
+    detections and still be "too sparse to list" -- so the table dropped species every other
+    chart was drawing. The table must always be a superset of what is charted.
+    """
+    r = _run(page)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "table lists everything the charts draw" in r.stdout, r.stdout
+
+
 def test_payload_carries_the_raw_times(page):
     """Without `phen` the floor silently reverts to whatever the build used."""
     import re

@@ -1853,12 +1853,16 @@ const COLDESC = {
   "Species":  "Common name as BirdNET labels it. Click a name to hear the call (daily scope, local dashboard only).",
   "mornings": "How many mornings in the scoped period this species was detected at all. Cannot exceed the number of mornings in scope.",
   "n":        "Total detections in the period. BirdNET emits roughly one per 3-second window per species, so this measures vocal ACTIVITY, not how many birds are present.",
-  "onset":    "Median start of song: the 5th percentile of detection times, in minutes from civil dawn. Needs at least 5 detections in a morning, otherwise blank.",
-  "offset":   "Median end of song: the 95th percentile of detection times, same units.",
+  "onset":    "Median start of song: the 5th percentile of detection times, in minutes from civil dawn. Only mornings that clear the detection floor ({FLOOR} detections) contribute; blank means none did.",
+  "offset":   "Median end of song: the 95th percentile of detection times, same units. Same {FLOOR}-detection floor as onset.",
   "span":     "offset minus onset. How long the species was detectably vocalising, not the length of one song bout.",
-  "peak":     "Midpoint of the busiest 5-minute bin: when the species was most vocal.",
+  "peak":     "Midpoint of the busiest 5-minute bin: when the species was most vocal. Unlike onset this needs no floor, so it is filled in even for sparse species.",
   "occ":      "Occupancy, 0 to 1: the fraction of 5-minute bins between onset and offset that held at least one detection. High means continuous singing, low means sporadic."
 };
+// The floor is a slider now, so any help text quoting it has to be built at render time.
+// It said "at least 5" for as long as 5 was the only possible answer, and went stale the
+// moment the toolbar could change it.
+const colDesc = h => (COLDESC[h]||"").replace(/\{FLOOR\}/g, MIN_DET);
 
 function renderTable(S){
   const g=aggBySpecies(S);
@@ -1868,8 +1872,13 @@ function renderTable(S){
       span:median(rs.map(r=>r.span)), peak:median(rs.map(r=>r.peak)), occ:median(rs.map(r=>r.occ))};
   }).sort((a,b)=> (a.onset==null)-(b.onset==null) || (a.onset-b.onset) || (b.n-a.n));
 
-  const thin=all.filter(d=>d.n<TABLE_MIN_DET);
-  const rows=tableShowAll ? all : all.filter(d=>d.n>=TABLE_MIN_DET);
+  // Sparse AND no phenology. The weak-evidence filter must never hide a species the rest
+  // of the page is charting: with the floor at 1 or 2 a species can earn an onset off two
+  // detections, and the flat `n < 3` rule then dropped 13 species from this table that the
+  // Overview, Selected period and Who sings when were all still drawing.
+  const weak = d => d.n<TABLE_MIN_DET && d.onset==null;
+  const thin=all.filter(weak);
+  const rows=tableShowAll ? all : all.filter(d=>!weak(d));
   const head=["Species","mornings","n","onset","offset","span","peak","occ"];
   const clickable = hasAudio() && S.length===1;
   const cell = d => clickable ? `<span class="listen" data-sp="${d.name}">${d.name}</span>` : d.name;
@@ -1877,20 +1886,29 @@ function renderTable(S){
     `<td>${fmt(d.onset,0)}</td><td>${fmt(d.offset,0)}</td><td>${fmt(d.span,0)}</td>`+
     `<td>${fmt(d.peak,0)}</td><td>${fmt(d.occ,2)}</td></tr>`).join("");
   const tbl=document.getElementById("tbl");
-  tbl.innerHTML = `<thead><tr>${head.map(h=>`<th title="${COLDESC[h]||""}">${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
+  tbl.innerHTML = `<thead><tr>${head.map(h=>`<th title="${esc(colDesc(h))}">${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
   if(clickable) tbl.querySelectorAll(".listen").forEach(x=> x.addEventListener("click", ()=>openAudioFor(x.dataset.sp)));
 
   const note=document.getElementById("tblNote");
   if(note){
-    if(!thin.length){ note.textContent = `${rows.length} species.`; }
-    else if(tableShowAll){
-      note.innerHTML = `${all.length} species, including ${thin.length} with fewer than `+
-        `${TABLE_MIN_DET} detections. <button type="button" id="tblToggle">Hide sparse ones</button>`;
-    } else {
-      note.innerHTML = `${rows.length} species shown; ${thin.length} with fewer than `+
-        `${TABLE_MIN_DET} detections hidden as weak evidence. `+
-        `<button type="button" id="tblToggle">Show all</button>`;
-    }
+    // Two different thresholds act on this table and they are easy to confuse, so name both.
+    // TABLE_MIN_DET decides which ROWS appear (total detections in the period, weak-evidence
+    // filter); the detection floor decides which rows get an ONSET (detections in a single
+    // morning). Raising the floor empties columns rather than removing rows -- without
+    // saying so, a table half full of dashes looks broken.
+    const blank=rows.filter(d=>d.onset==null).length;
+    const rowNote = !thin.length ? `${rows.length} species.`
+      : tableShowAll
+        ? `${all.length} species, including ${thin.length} with fewer than `+
+          `${TABLE_MIN_DET} detections in this period and no onset. `+
+          `<button type="button" id="tblToggle">Hide sparse ones</button>`
+        : `${rows.length} species shown; ${thin.length} with fewer than `+
+          `${TABLE_MIN_DET} detections in this period and no onset hidden as weak evidence. `+
+          `<button type="button" id="tblToggle">Show all</button>`;
+    note.innerHTML = rowNote + (blank
+      ? ` <span class="muted">${blank} of ${rows.length} have no onset at the current `+
+        `detection floor (${MIN_DET} in one morning) &mdash; they are still listed, with `+
+        `their counts and peak.</span>` : ``);
     const b=document.getElementById("tblToggle");
     if(b) b.onclick=()=>{ tableShowAll=!tableShowAll; renderTable(scopedDays()); };
   }

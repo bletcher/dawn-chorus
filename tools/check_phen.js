@@ -27,6 +27,19 @@ function extract(src, name) {
   }
   throw new Error("unbalanced " + name);
 }
+// A const/let declaration may span lines and contain braces; scan to the `;` at depth 0.
+function extractConst(src, name) {
+  const m = new RegExp("(?:^|\\n)\\s*(?:const|let)\\s+" + name + "\\s*=").exec(src);
+  if (!m) throw new Error("no const " + name);
+  let d = 0;
+  for (let j = m.index; j < src.length; j++) {
+    const c = src[j];
+    if ("({[".includes(c)) d++;
+    else if (")}]".includes(c)) d--;
+    else if (c === ";" && d === 0) return src.slice(m.index, j + 1);
+  }
+  throw new Error("unterminated " + name);
+}
 
 const argv = process.argv.slice(2);
 const pi = argv.indexOf("--payload");
@@ -133,5 +146,48 @@ for (const page of pages) {
   if (mism) { console.log(`     FAIL ${mism} of ${checked} Overview/chapter combinations disagree`); failures++; }
   else if (moved) console.log(`     ok   Overview matches the chapter across ${checked} floor x grain x period ` +
     `combinations, and follows the floor (${lo.species} species at 1 -> ${hi.species} at 20)`);
+
+  // --- the species table must be a SUPERSET of what the charts draw ----------------------
+  // Its weak-evidence filter counts total detections; the floor counts detections in one
+  // morning. Below a floor of 3 those disagree, and the flat rule silently dropped species
+  // every other chart on the page was still drawing. Run the real renderTable and check.
+  const tableAt = floor => {
+    const out = { tbl: "", note: "" };
+    const document = { getElementById(id) {
+      if (id === "tbl") return { set innerHTML(v) { out.tbl = v; }, querySelectorAll: () => [] };
+      if (id === "tblNote") return { set textContent(v) { out.note = v; }, set innerHTML(v) { out.note = v; } };
+      return null; } };
+    const ctx = { meta, summary: summaryAt(floor), document, MIN_DET: floor,
+      hasAudio: () => false, scopedDays: () => meta.days, tableShowAll: false,
+      esc: s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])) };
+    const body = extractConst(src, "median") + "\n" + extractConst(src, "fmt") + "\n" +
+      extractConst(src, "TABLE_MIN_DET") + "\n" + extractConst(src, "COLDESC") + "\n" +
+      extractConst(src, "colDesc") + "\n" + extract(src, "aggBySpecies") + "\n" +
+      extract(src, "renderTable") + "\nrenderTable(meta.days); return out;";
+    new Function(...Object.keys(ctx), "out", body)(...Object.values(ctx), out);
+    return out;
+  };
+  let tbad = 0;
+  for (const f of [1, 2, 3, 5, 10, 20]) {
+    const out = tableAt(f);
+    const listed = new Set([...out.tbl.matchAll(/<tr><td>(.*?)<\/td>/g)].map(m => m[1]));
+    const charted = summaryAt(f).filter(r => r.onset != null).map(r => r.name);
+    const lost = [...new Set(charted)].filter(n => !listed.has(n));
+    if (lost.length) {
+      tbad++;
+      console.log(`     FAIL floor=${f}: ${lost.length} species have an onset but are not in the ` +
+        `table (${lost.slice(0, 3).join(", ")}${lost.length > 3 ? ", …" : ""})`);
+    }
+    // help text quoting a stale floor is the same class of bug, one layer up
+    const help = /<th title="([^"]*)">onset<\/th>/.exec(out.tbl);
+    const q = help && /\((\d+) detections\)/.exec(help[1]);
+    if (!q || +q[1] !== f) {
+      tbad++;
+      console.log(`     FAIL floor=${f}: the onset column's help says "${q ? q[1] : "?"}"`);
+    }
+  }
+  if (tbad) failures++;
+  else console.log(`     ok   species table lists everything the charts draw, and its column help ` +
+    `tracks the floor, at floors 1-20`);
 }
 process.exit(failures ? 1 : 0);
