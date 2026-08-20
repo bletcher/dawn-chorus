@@ -80,10 +80,20 @@ function ladder(src) {
     // loaded and not before, which is what showSpec toggles.
     [/function showSpec[\s\S]{0,220}?rungEl\("clip"\)/.test(src),
       "the clip rung appears only when there is a clip"],
-    [/data-rung="selection"[\s\S]*?data-card="timeline"[\s\S]*?data-card="period"/.test(src),
-      "Who sings when leads the selection rung"],
+    // The score is the page's hero, above the scope bar: a visitor meets a picture before
+    // a control. Crucially it was MOVED there, so there is still exactly one of it -- a
+    // second copy in the ladder would be the duplication the roll-up already had to lose.
+    [src.indexOf('id="chart-hero"') > 0 &&
+     src.indexOf('id="chart-hero"') < src.indexOf('class="scopebar"'),
+      "the score is the hero, above the scope bar"],
+    [(src.match(/id="chart-hero"/g) || []).length === 1 && !src.includes('data-card="timeline"'),
+      "and it exists exactly once — moved, not copied"],
+    [/data-mode="picture"/.test(src) && /data-mode="precision"/.test(src),
+      "the hero offers Picture and Precision"],
+    [/HERO_MODE==="picture"/.test(src),
+      "Picture drops the occupancy ramp rather than drawing a second chart"],
     [rungs.every(r => scopes.includes(r)), "every rung has a scope sentence element"],
-    [cards.length === 9, `all nine cards survive the restructure (got ${cards.length})`],
+    [cards.length === 8, `eight cards plus the hero (got ${cards.length})`],
     [/data-card="season"/.test(seasonBody),
       "the seasonal chart sits on the rung that ignores the scope"],
     [/data-card="trend"/.test(seasonBody), "the record-wide trend sits on the season rung"],
@@ -107,9 +117,9 @@ function ladder(src) {
     // finding, because that one changes with the data. A card that puts its prose back on
     // the page would undo the point of the button.
     // Count card OPENINGS, not every `data-card=` in the file -- the JS selectors match too.
-    [(src.match(/class="infobtn"/g) || []).length ===
-     (src.match(/<section class="card" data-card="/g) || []).length,
-      "every chart card has an info button"],
+    [(src.match(/class="infobtn/g) || []).length ===
+     (src.match(/<section class="card" data-card="/g) || []).length + 1,
+      "every chart card has an info button, and so does the hero"],
     [!/<p class="lead">/.test(src.slice(src.indexOf('class="ladder"'), src.indexOf("<footer"))),
       "no card puts its method text back on the page"],
     [!src.includes('class="cardq"'), "the chapter questions, which restated the titles, are gone"],

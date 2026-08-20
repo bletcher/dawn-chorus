@@ -76,8 +76,10 @@ def test_every_card_and_finding_survived(page):
     """Nine cards and seven computed findings, same as before the restructure."""
     src = page.read_text(encoding="utf-8")
     cards = set(re.findall(r'data-card="([\w-]+)"', src))
-    assert cards == {"trend", "period", "timeline", "ecdf", "heat",
+    assert cards == {"trend", "period", "ecdf", "heat",
                      "season", "temp", "rain", "table"}, sorted(cards)
+    assert 'id="chart-hero"' in src, "the score should be the hero"
+    assert 'data-card="timeline"' not in src, "the score was moved, not copied"
     finds = set(re.findall(r'id="find-(\w+)"', src))
     assert finds == {"overview", "period", "morning", "shape",
                      "season", "weather", "species"}, sorted(finds)

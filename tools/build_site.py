@@ -537,6 +537,26 @@ TEMPLATE = r"""<!doctype html>
      and what the data says, then shows the charts that answer it. The rail sticks so the
      question stays on screen while you read the chart -- the thing that makes this a
      narrative rather than a stack of plots. */
+  /* ── The hero ─────────────────────────────────────────────────────────────────────
+     The page used to open on a control bar and a chart titled "Who sings when", which
+     assumes you already know what an onset is. It opens on a picture now: names, bars, a
+     dawn line, and one plain sentence. Precision puts the statistics back for the reader
+     who wants them -- the same chart, not a second one. */
+  .hero{margin:0 0 22px}
+  .herohead{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px}
+  .heroname{font-size:clamp(21px,2.6vw,29px); letter-spacing:-.02em; margin:0; line-height:1.15;
+    text-wrap:balance}
+  .heroinfo{position:static; flex:none}
+  .herohead .metseg{margin-left:auto}
+  /* The first sentence on the page carries the finding, so it is set to be read, not
+     skimmed past like a caption. */
+  .heroline{font-size:16px; line-height:1.55; color:var(--ink2); border-left:0; padding-left:0;
+    margin:0 0 14px; max-width:70ch}
+  .heroline b{color:var(--ink); font-weight:600}
+  .hero .about{position:static; width:auto; max-width:70ch; margin:0 0 12px; box-shadow:none;
+    background:var(--scope)}
+  @media (max-width:720px){ .herohead .metseg{margin-left:0} }
+
   /* ── The ladder ───────────────────────────────────────────────────────────────────
      Four named levels, each stating its own relationship to the time scope in its
      header. The page used to have four levels too -- but they were unlabelled, so one
@@ -736,6 +756,21 @@ TEMPLATE = r"""<!doctype html>
     </div>
   </header>
 
+  <section class="hero" id="hero">
+    <div class="herohead">
+      <h2 class="heroname">The chorus, in order of who starts</h2>
+      <button type="button" class="infobtn heroinfo" aria-expanded="false"
+              aria-label="How to read this" title="How to read this">i</button>
+      <span class="metseg" id="heroMode" role="group" aria-label="Detail">
+        <button type="button" data-mode="picture" aria-pressed="true">Picture</button>
+        <button type="button" data-mode="precision" aria-pressed="false">Precision</button>
+      </span>
+    </div>
+    <p class="chfind heroline" id="find-morning"></p>
+    <div class="about" hidden><p>Each bar spans a species' vocal activity &mdash; onset (5th percentile of detection times) to offset (95th) &mdash; in minutes from <span class="tag">civil dawn</span> (dashed line), median across the selection's mornings. Darker bars are sung more continuously; the tick marks the median busiest minute. Click a bar to hear that species.</p></div>
+    <div class="plot" id="chart-hero"></div>
+  </section>
+
   <div class="scopebar">
     <div class="scoperow striprow">
       <span class="eyebrow">Record</span>
@@ -776,7 +811,9 @@ TEMPLATE = r"""<!doctype html>
     </div>
   </div>
 
-    <div class="ladder">
+  
+
+  <div class="ladder">
 
   <section class="rung" data-rung="selection">
     <header class="rhead">
@@ -784,13 +821,6 @@ TEMPLATE = r"""<!doctype html>
       <p class="rscope" id="scope-selection"></p>
     </header>
     <div class="rbody">
-      <section class="card" data-card="timeline">
-        <h2 class="display">Who sings when</h2>
-        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
-        <p class="chfind" id="find-morning"></p>
-        <div class="about" hidden><p>Each bar spans a species' vocal activity &mdash; onset (5th percentile of detection times) to offset (95th) &mdash; in minutes from <span class="tag">civil dawn</span> (dashed line), median across the selection's mornings. Darker bars are sung more continuously; the tick marks the median busiest minute. Click a bar to hear that species.</p></div>
-        <div class="plot" id="chart-timeline"></div>
-      </section>
       <section class="card" data-card="period">
         <h2 class="display">Calls by species</h2>
         <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
@@ -2014,8 +2044,13 @@ function periodNote(all, sparse, rows, S){
   if(b) b.onclick=()=>{ periodShowAll=!periodShowAll; renderPeriod(scopedDays()); renderFindings(scopedDays()); };
 }
 
+/* The page's one picture. Same geometry at two levels of detail rather than two charts:
+   Picture is what a visitor can read without being taught anything -- names, bars, a dawn
+   line; Precision adds the statistics the bars are actually made of. Promoted here from the
+   middle of the page, and MOVED rather than copied, so there is still exactly one of it. */
+let HERO_MODE = localStorage.getItem("dc_hero_mode")==="precision" ? "precision" : "picture";
 function renderTimeline(S){
-  const el=document.getElementById("chart-timeline"); el.innerHTML="";
+  const el=document.getElementById("chart-hero"); el.innerHTML="";
   const g=aggBySpecies(S);
   const rows=Object.keys(g).map(name=>{ const all=g[name], rs=all.filter(r=>r.onset!=null);
     if(!rs.length) return null;
@@ -2029,16 +2064,23 @@ function renderTimeline(S){
       n:all.reduce((s,r)=>s+r.n,0), mornings:all.length, onsetMornings:rs.length};
   }).filter(Boolean).sort((a,b)=>a.onset-b.onset);
   if(!rows.length){ el.innerHTML='<p class="empty">No species cleared the onset threshold in this period.</p>'; return; }
-  const names=rows.map(d=>d.name);
-  el.append(Plot.plot({ width:W(el), height:names.length*26+80, marginLeft:ML(el,true), marginRight:26, style:plotStyle(),
+  const names=rows.map(d=>d.name), pic = HERO_MODE==="picture";
+  el.append(Plot.plot({ width:W(el), height:names.length*(pic?24:26)+(pic?58:80),
+    marginLeft:ML(el,true), marginRight:pic?18:26, style:plotStyle(),
     x:xAxis({grid:true}), y:{domain:names, label:null, tickFormat:n=>spName(n,el)},
-    color:{type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")], legend:true, label:"median occupancy"},
+    // Picture mode drops the occupancy ramp: a second scale to learn before you can read
+    // the first thing on the page is the opposite of what a hero is for.
+    color: pic ? undefined
+      : {type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")], legend:true, label:"median occupancy"},
     marks:[
       Plot.ruleX([xv(0)], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
-      Plot.barX(rows, {x1:d=>xv(d.onset), x2:d=>xv(d.offset), y:"name", fill:"occ", rx:3, insetTop:5, insetBottom:5}),
+      Plot.barX(rows, pic
+        ? {x1:d=>xv(d.onset), x2:d=>xv(d.offset), y:"name", fill:css("--accent"), fillOpacity:.85, rx:4, insetTop:5, insetBottom:5}
+        : {x1:d=>xv(d.onset), x2:d=>xv(d.offset), y:"name", fill:"occ", rx:3, insetTop:5, insetBottom:5}),
+      ...(pic ? [] : [
       Plot.tickX(rows, {x:d=>xv(d.peak), y:"name", stroke:css("--ink"), strokeWidth:2, strokeOpacity:.85}),
       Plot.dot(rows, {x:d=>xv(d.onset), y:"name", r:3.4, fill:css("--ink"), stroke:css("--surface"), strokeWidth:1}),
-      Plot.text(rows, {x:d=>xv(d.offset), y:"name", text:d=>d.n.toLocaleString(), dx:8, textAnchor:"start", fill:css("--muted"), fontSize:10}),
+      Plot.text(rows, {x:d=>xv(d.offset), y:"name", text:d=>d.n.toLocaleString(), dx:8, textAnchor:"start", fill:css("--muted"), fontSize:10})]),
       Plot.tip(rows, Plot.pointerY({x:d=>xv(d.onset), y:"name",
         title:d=>`${d.name}\nonset ${xTitle(d.onset)}  offset ${xTitle(d.offset)}\nspan ${fmt(d.offset-d.onset,0)} min · occ ${fmt(d.occ,2)}\n`+
           `${d.n.toLocaleString()} detections over ${d.mornings} morning(s)\n`+
@@ -2485,8 +2527,16 @@ function renderFindings(S){
 
   if(rows.length){
     const f=rows[0], l=rows[rows.length-1];
-    put("morning", `${f.n} leads at ${xTitle(f.onset)}; ${l.n} is last at ${xTitle(l.onset)}. `+
-      `${rows.length} species have a defined onset over ${S.length} morning${S.length===1?"":"s"}.`);
+    // Plain language, because this is the first sentence on the page and the person reading
+    // it may never have heard of an onset percentile. "42 min after first light" needs no
+    // glossary; "onset 42" does.
+    const clock = m => { const a=Math.abs(Math.round(m)), h=Math.floor(a/60), mm=a%60;
+      return h ? `${h}h ${mm}m` : `${mm} minute${mm===1?"":"s"}`; };
+    const rel = m => Math.round(m)===0 ? "right at first light"
+      : Math.round(m)<0 ? `${clock(m)} before first light` : `${clock(m)} after first light`;
+    put("morning", `The <b>${f.n}</b> starts ${rel(f.onset)}. The <b>${l.n}</b> waits until `+
+      `${rel(l.onset)} &mdash; ${rows.length} species in all, `+
+      `across ${S.length} morning${S.length===1?"":"s"}.`);
     put("shape", `${rows.length} species charted. Curves that rise early and steeply are the ones `+
       `doing most of their singing before the light arrives.`);
   } else { put("morning",""); put("shape",""); }
@@ -2525,6 +2575,17 @@ function renderFindings(S){
     syncTrendMetric(); renderStrip(S); renderTrend(); renderFindings(S);
   });
 })();
+(()=>{ const seg=document.getElementById("heroMode"); if(!seg) return;
+  seg.addEventListener("click", e=>{
+    const b=e.target.closest("button[data-mode]"); if(!b) return;
+    HERO_MODE=b.dataset.mode; localStorage.setItem("dc_hero_mode", HERO_MODE);
+    syncHeroMode(); renderTimeline(scopedDays());
+  });
+})();
+function syncHeroMode(){
+  document.querySelectorAll("#heroMode button").forEach(b=>
+    b.setAttribute("aria-pressed", String(b.dataset.mode===HERO_MODE)));
+}
 function syncTrendMetric(){
   document.querySelectorAll("#stripMetric button").forEach(b=>
     b.setAttribute("aria-pressed", String(b.dataset.metric===TREND_METRIC)));
@@ -2730,7 +2791,7 @@ document.getElementById("theme").onclick = ()=>{ const curTheme=root.getAttribut
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", ()=>{ if(!root.hasAttribute("data-theme")) renderAll(); });
 let rz; addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(()=>{ renderAll(); renderClip(); }, 180); });
 
-renderSubline(); renderFoot(); buildChips(); syncTrendMetric(); rebuildPeriods();
+renderSubline(); renderFoot(); buildChips(); syncTrendMetric(); syncHeroMode(); rebuildPeriods();
 }
 // Static build embeds JSON in #data; the viewer leaves it empty and provides __bootFetch.
 (function(){ const el=document.getElementById("data"), t=el?el.textContent.trim():"";
