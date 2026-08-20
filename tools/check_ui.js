@@ -78,6 +78,13 @@ function ladder(src) {
     [/data-card="trend"/.test(seasonBody), "the record-wide trend sits on the season rung"],
     [!src.includes('class="chapter"'), "the old chapter layout is gone"],
     [src.includes('id="crumb"'), "the breadcrumb is present"],
+    // The roll-up chart used to follow the Snap control, which meant that at Snap = Morning
+    // it drew the context strip's series a second time one screen below it. Its grain is now
+    // its own and starts at Week, so the two can never show the same thing.
+    [!/<select id="trendGrain">[\s\S]*?value="day"[\s\S]*?<\/select>/.test(src),
+      "the roll-up cannot be set to Morning, so it can never duplicate the strip"],
+    [/let TREND_GRAIN/.test(src) && /renderTrend[\s\S]{0,400}?TREND_GRAIN/.test(src),
+      "the roll-up reads its own grain, not the selection's"],
   ];
 }
 

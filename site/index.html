@@ -388,17 +388,25 @@
     </header>
     <div class="rbody">
       <section class="card" data-card="trend">
-        <h2 class="display">Across the record <span class="muted" id="trendGrain"></span></h2>
+        <h2 class="display">Rolled up <span class="muted" id="trendGrainLabel"></span></h2>
         <p class="cardq">How much is being heard, and how does that change as the season turns?</p>
         <p class="chfind" id="find-overview"></p>
-        <p class="lead">Every period on record at the current aggregation, <em>not</em> just the one in
-          scope &mdash; this is the only chart on the page that ignores the selection, because a
-          single period cannot show you a trend. The highlighted bar is the period everything below is
-          scoped to; click any bar to move there. Counts follow the
-          <span class="tag">detection floor</span>: a species is counted in a period once it clears the
-          floor on one of that period's mornings, the same test the charts below use, so the highlighted
-          bar always equals the chapter under it.</p>
+        <p class="lead">The record <em>rolled up</em> &mdash; the one thing the strip at the top cannot
+          show you, since it always draws one bar per morning and never re-buckets. Weeks and months
+          smooth out the morning-to-morning noise that dominates a short record: a single quiet morning
+          is weather, a quiet month is the season turning. Like the strip, this ignores the selection;
+          highlighted bars are the periods the selection touches, and clicking one scopes to it.
+          Counts follow the <span class="tag">detection floor</span> &mdash; a species is counted in a
+          period once it clears the floor on one of that period's mornings, the same test every chart
+          below uses.</p>
         <div class="controls">
+          <label class="ctl">Roll&nbsp;up&nbsp;by
+            <select id="trendGrain">
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+              <option value="year">Year</option>
+            </select>
+          </label>
           <span class="mutedhint" id="trendHint"></span>
         </div>
         <div class="plot" id="chart-trend"></div>
@@ -1396,15 +1404,24 @@ function stepSelection(delta){
   return setSel(meta.days.indexOf(first[0]), meta.days.indexOf(last[last.length-1]), {snap:false});
 }
 
+/* This chart owns its own grain, and the finest it offers is Week.
+   It used to follow the Snap control, which meant that at Snap = Morning it drew exactly the
+   context strip, one screen below the context strip -- the same series twice, with the larger
+   copy adding nothing but axes. Rolling up is the one thing the strip refuses to do (context
+   must stay at full resolution), so that is what this does and all it does. While the record
+   is too short for the roll-up to say anything, autoThin folds the card away. */
+let TREND_GRAIN=(()=>{ const v=localStorage.getItem("dc_trend_grain");
+  return ["week","month","year"].includes(v) ? v : "week"; })();
 function renderTrend(){
   const el=document.getElementById("chart-trend"); el.innerHTML="";
-  const level=aggSel.value, rows=trendRows(), metric=TREND_METRIC;
+  const level=TREND_GRAIN, keys=periodsFor(level);
+  const rows=trendRows(level, keys), metric=TREND_METRIC;
   // A selection can straddle several periods now, so "the current bar" is any bar the
   // selection touches -- highlighting only one would under-report what is in scope.
   const inSel=new Set(scopedDays().map(d=>day_keys[d][level]));
-  const cur=null;
-  const g=document.getElementById("trendGrain");
-  if(g) g.textContent = `· by ${PERIOD_WORD[level]||level}`;
+  const g=document.getElementById("trendGrainLabel");
+  if(g) g.textContent = `by ${PERIOD_WORD[level]||level}`;
+  autoThin("trend", rows.length, PERIOD_WORD[level]||level);
   const hint=document.getElementById("trendHint");
   if(!rows.length){ el.innerHTML='<p class="empty">Nothing on record yet.</p>'; if(hint) hint.textContent=""; return; }
   const total=rows.reduce((s,d)=>s+d[metric],0);
@@ -1496,14 +1513,18 @@ function setCollapsed(key, on, explicit){
 // Auto-collapse a chart the scope has left too thin to read. `n` is the number of points
 // the chart would draw, so this follows the aggregation level for free.
 const THIN=8;
-function autoThin(key, n){
+function autoThin(key, n, noun){
   if(key in CARDS) return;                                   // the user has decided; leave it
   const el=cardEl(key); if(!el) return;
   const thin = SETTINGS.autoCollapse && n < THIN;
   el.classList.toggle("collapsed", thin);
   const h=el.querySelector("h2"); let why=h && h.querySelector(".why");
+  // `noun` for charts that are not scoped: "only 4 weeks on record" is the truth for the
+  // roll-up, where "in this period" would be plainly wrong.
+  const what = noun ? `only ${n} ${noun}${n===1?"":"s"} on record`
+                    : (n ? `only ${n} point${n===1?"":"s"} in this period` : "no data in this period");
   if(h){ if(thin){ if(!why){ why=document.createElement("span"); why.className="why"; h.appendChild(why); }
-                   why.textContent = n ? `only ${n} point${n===1?"":"s"} in this period` : "no data in this period"; }
+                   why.textContent = n ? what : (noun ? "nothing on record yet" : "no data in this period"); }
          else if(why) why.remove(); }
 }
 
@@ -2076,7 +2097,9 @@ function renderFindings(S){
   } else put("period","");
 
   // The overview chapter reports the WHOLE record, so it must not be computed from S.
-  const tr=trendRows(), M=TREND_METRIC, word=PERIOD_WORD[aggSel.value]||aggSel.value;
+  // Reports on the roll-up, so it follows the roll-up's grain, not the selection's.
+  const tr=trendRows(TREND_GRAIN, periodsFor(TREND_GRAIN)), M=TREND_METRIC,
+        word=PERIOD_WORD[TREND_GRAIN]||TREND_GRAIN;
   if(tr.length){
     const vals=tr.map(d=>d[M]), sum=vals.reduce((a,b)=>a+b,0);
     const hi=tr.reduce((a,b)=>b[M]>a[M]?b:a, tr[0]), lo=tr.reduce((a,b)=>b[M]<a[M]?b:a, tr[0]);
@@ -2126,6 +2149,11 @@ function renderFindings(S){
 // Calls vs species: two genuinely different questions. Calls is dominated by whichever
 // species happens to be repetitive that week; species counts every bird once, so a quiet
 // morning with a wide cast reads high on one and low on the other.
+(()=>{ const g=document.getElementById("trendGrain"); if(!g) return;
+  g.value=TREND_GRAIN;
+  g.onchange=()=>{ TREND_GRAIN=g.value; localStorage.setItem("dc_trend_grain", TREND_GRAIN);
+    renderTrend(); renderFindings(scopedDays()); };
+})();
 // The metric now lives in the context band, because it governs the strip AND Rung 1's full
 // trend -- one piece of state, so one control, in the band where the other global lenses are.
 (()=>{ const seg=document.getElementById("stripMetric"); if(!seg) return;
