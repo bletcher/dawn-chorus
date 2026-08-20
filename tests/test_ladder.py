@@ -1,0 +1,73 @@
+"""The ladder's structure and the audio rung's three states.
+
+Phase 1 of the Brush-and-Rungs restructure moved every chart into a named rung. The claim
+was that nothing changed except the seasonal chart's home, and a large markup move is
+exactly where that claim breaks quietly -- one dropped element and a control stops working
+with no error anywhere.
+
+The audio rung matters most because it differs BETWEEN BUILDS: recordings never leave the
+machine, so the published payload carries no `audio` and rung 3 must not exist there at
+all. That difference is invisible in any single page's markup, so it is checked by running
+the page's real updateAudioCard against a stub in each state.
+"""
+from __future__ import annotations
+
+import re
+import subprocess
+from pathlib import Path
+
+import pytest
+
+import build_site
+import check_js
+
+pytestmark = pytest.mark.skipif(not check_js.have_node(),
+                                reason="node is not installed; cannot run the emitted JS")
+SCRIPT = Path(__file__).resolve().parent.parent / "tools" / "check_ui.js"
+
+
+@pytest.fixture(scope="module")
+def page(tmp_path_factory):
+    src = tmp_path_factory.mktemp("results")
+    lines = ["Start (s),End (s),Scientific name,Common name,Confidence"]
+    for i, o in enumerate([37, 61, 62, 149, 210, 211, 640, 1811, 3007, 5400]):
+        lines.append(f"{o}.0,{o+3}.0,Turdus migratorius,American Robin,{0.55 + (i % 4) * 0.08:.2f}")
+    (src / "20260517_043000.BirdNET.results.csv").write_text("\n".join(lines) + "\n",
+                                                            encoding="utf-8")
+    out = tmp_path_factory.mktemp("ladder") / "dash.html"
+    build_site.main(["--from-analyzer", str(src), "--out", str(out),
+                     "--lat", "42.5372", "--lon", "-72.5317", "--tz", "America/New_York"])
+    return out
+
+
+def test_ladder_and_audio_states(page):
+    r = subprocess.run(["node", str(SCRIPT), str(page)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "FAIL" not in r.stdout, r.stdout
+
+
+def test_every_card_and_finding_survived(page):
+    """Nine cards and seven computed findings, same as before the restructure."""
+    src = page.read_text(encoding="utf-8")
+    cards = set(re.findall(r'data-card="([\w-]+)"', src))
+    assert cards == {"trend", "period", "timeline", "ecdf", "heat",
+                     "season", "temp", "rain", "table"}, sorted(cards)
+    finds = set(re.findall(r'id="find-(\w+)"', src))
+    assert finds == {"overview", "period", "morning", "shape",
+                     "season", "weather", "species"}, sorted(finds)
+
+
+def test_the_checker_fails_on_a_dead_locked_rung(page, tmp_path):
+    """A guard that cannot fail is not a guard.
+
+    Reintroduce the pre-restructure behaviour, where only the CARD was hidden and the rung
+    stayed on screen -- which on the published site would leave a rung nobody can ever open.
+    """
+    src = page.read_text(encoding="utf-8")
+    broken = src.replace("if(!hasAudio()){ rung.hidden=true; return; }",
+                         "if(!hasAudio()){ card.hidden=true; return; }", 1)
+    assert broken != src, "patch point not found"
+    p = tmp_path / "broken.html"
+    p.write_text(broken, encoding="utf-8")
+    r = subprocess.run(["node", str(SCRIPT), str(p)], capture_output=True, text=True)
+    assert r.returncode != 0 and "FAIL" in r.stdout, r.stdout

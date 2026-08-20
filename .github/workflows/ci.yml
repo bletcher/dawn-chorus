@@ -53,3 +53,9 @@ jobs:
       # this checks the COMMITTED one, which is what visitors actually get.
       - name: Check the committed viewer's phenology matches Python
         run: node tools/check_phen.js site/index.html --payload site/data/montague.json
+
+      # The audio rung differs BETWEEN builds -- recordings never leave the machine, so the
+      # published payload has no audio and rung 3 must not exist there. That difference is
+      # invisible in the markup, so the real state functions are run against a stub.
+      - name: Check the committed viewer's ladder and audio states
+        run: node tools/check_ui.js site/index.html

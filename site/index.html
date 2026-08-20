@@ -138,41 +138,69 @@
      and what the data says, then shows the charts that answer it. The rail sticks so the
      question stays on screen while you read the chart -- the thing that makes this a
      narrative rather than a stack of plots. */
-  .chapters{position:relative}
-  .chapter{display:grid; grid-template-columns:230px minmax(0,1fr); gap:26px;
-    align-items:start; margin:0 0 40px}
-  .rail{position:sticky; top:112px; padding-left:20px}
-  /* The spine is the signature: a vertical gradient from pre-dawn blue through the dawn
-     amber to daylight, with a node at each chapter. It is not decoration -- it is the
-     same solar axis every chart on the page is plotted against. */
-  .rail::before{content:""; position:absolute; left:0; top:6px; bottom:-40px; width:2px;
+  /* ── The ladder ───────────────────────────────────────────────────────────────────
+     Four named levels, each stating its own relationship to the time scope in its
+     header. The page used to have four levels too -- but they were unlabelled, so one
+     control appeared to mean three different things depending on which chart you were
+     looking at. Naming the rungs is the whole fix; no chart moved except the seasonal
+     one, which now sits on the rung that ignores the scope by definition. */
+  .ladder{position:relative}
+  .rung{margin:0 0 26px; border-left:2px solid var(--line); padding-left:20px; position:relative}
+  /* The spine survives the restructure: a vertical gradient from pre-dawn blue through
+     dawn amber to daylight. It is the same solar axis every chart is plotted against. */
+  .rung::before{content:""; position:absolute; left:-2px; top:0; bottom:0; width:2px;
     background:linear-gradient(180deg, var(--spine-a), var(--spine-b))}
-  .chapter:last-child .rail::before{bottom:auto; height:64px}
-  .rail::after{content:""; position:absolute; left:-4px; top:6px; width:10px; height:10px;
+  .rhead{display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:4px 12px;
+    align-items:baseline; padding:0 0 12px; cursor:pointer; user-select:none;
+    position:sticky; top:calc(var(--barh, 112px) + 4px); z-index:9;
+    background:linear-gradient(180deg, var(--bg) 78%, transparent)}
+  .rnum{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace); font-size:10.5px;
+    letter-spacing:.12em; text-transform:uppercase; color:var(--dawn); font-weight:700;
+    border:1px solid var(--dawn); border-radius:99px; padding:2px 8px; white-space:nowrap}
+  .rname{font-size:21px; line-height:1.15; margin:0; letter-spacing:-.01em}
+  .rmark{width:22px; height:22px; display:grid; place-items:center; color:var(--muted);
+    border:1px solid var(--line); border-radius:6px; font-size:11px; line-height:1}
+  .rmark::before{content:"−"}
+  .rung.collapsed .rmark::before{content:"+"}
+  .rung.collapsed .rbody{display:none}
+  .rung.collapsed .rhead{padding-bottom:4px}
+  /* The scope sentence is the point of the header: it says what this rung is showing and
+     how it relates to the slider, so nobody has to infer it chart by chart. */
+  .rscope{grid-column:2 / -1; font-size:13px; color:var(--muted); margin:0; line-height:1.5;
+    font-variant-numeric:tabular-nums}
+  .rscope:empty{display:none}
+  .rung::after{content:""; position:absolute; left:-7px; top:7px; width:11px; height:11px;
     border-radius:50%; background:var(--dawn); box-shadow:0 0 0 3px var(--bg)}
-  .chwhen{display:block; font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);
-    font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--dawn);
-    font-weight:700; margin-bottom:7px}
-  .chtitle{font-size:20px; line-height:1.15; margin:0 0 8px; letter-spacing:-.01em;
-    text-wrap:balance}
-  .chq{font-size:13.5px; color:var(--ink2); margin:0 0 10px; line-height:1.5}
-  .chfind{font-size:13px; color:var(--muted); margin:0; line-height:1.55;
+  .rbody{min-width:0}
+  .rgate{font-size:13.5px; color:var(--ink2); background:var(--scope); border:1px dashed var(--line);
+    border-radius:10px; padding:12px 14px; margin:0 0 18px; line-height:1.55}
+  .rgate button{font:inherit; font-size:13px; margin-left:8px; background:none; border:1px solid var(--accent);
+    color:var(--accent); border-radius:99px; padding:3px 11px; cursor:pointer}
+  .rgate button:hover{background:var(--accent); color:#fff}
+  /* The chapter's question and its computed finding travel with the card now that the
+     chapter is no longer a layout unit. */
+  .cardq{font-size:13.5px; color:var(--ink2); margin:0 0 6px; line-height:1.5; font-style:italic}
+  .chfind{font-size:13px; color:var(--muted); margin:0 0 12px; line-height:1.55;
     border-left:2px solid var(--line); padding-left:10px}
   .chfind:empty{display:none}
-  .chbody{min-width:0}
   /* Two charts that are meant to be compared sit side by side, not 400px apart. */
-  .chbody.pair{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px}
-  .chbody.pair > .card{margin-bottom:0}
-  @media (max-width:1100px){ .chbody.pair{grid-template-columns:1fr} .chbody.pair > .card{margin-bottom:20px} }
+  .pair{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px}
+  .pair > .card{margin-bottom:20px}
+  @media (max-width:1100px){ .pair{grid-template-columns:1fr} }
   @media (max-width:900px){
-    /* Rail becomes a header: the question still arrives before the chart, which is the
-       point of the narrative -- it just stops being a column. */
-    .chapter{grid-template-columns:1fr; gap:12px; margin-bottom:30px}
-    .rail{position:static; padding-left:16px}
-    .rail::before{top:2px; bottom:2px}
-    .rail::after{top:2px}
-    .chtitle{font-size:18px}
+    .rung{padding-left:16px; margin-bottom:22px}
+    .rname{font-size:18px}
+    .rhead{position:static; background:none}
   }
+  /* ── Breadcrumb ───────────────────────────────────────────────────────────────── */
+  .crumbrow{padding-bottom:2px}
+  .crumb{display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:13px; min-width:0}
+  .crumb button{font:inherit; font-size:13px; background:none; border:0; padding:2px 0; cursor:pointer;
+    color:var(--ink2); border-bottom:1px solid transparent}
+  .crumb button:hover{color:var(--ink); border-bottom-color:var(--accent)}
+  .crumb button[aria-current="true"]{color:var(--ink); font-weight:600}
+  .crumb button:disabled{color:var(--muted); cursor:default; opacity:.6}
+  .crumb .sep{color:var(--line)}
   section.card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px 18px 8px; margin-bottom:20px; box-shadow:var(--shadow)}
   .card h2{font-size:19px; margin:0 0 3px; letter-spacing:-.01em}
   .card .lead{color:var(--ink2); font-size:13.5px; margin:0 0 14px; max-width:64ch}
@@ -283,6 +311,10 @@
   </header>
 
   <div class="scopebar">
+    <div class="scoperow crumbrow">
+      <span class="eyebrow">You&nbsp;are&nbsp;here</span>
+      <nav class="crumb" id="crumb" aria-label="Where you are"></nav>
+    </div>
     <div class="scoperow">
       <span class="eyebrow">Time&nbsp;scope</span>
       <label class="ctl">Aggregate
@@ -314,7 +346,140 @@
     </div>
   </div>
 
-  <section class="card audio" id="audioCard" hidden>
+    <div class="ladder">
+
+  <section class="rung" data-rung="season">
+    <header class="rhead">
+      <span class="rnum">Rung 1</span>
+      <h2 class="rname">Season</h2>
+      <p class="rscope" id="scope-season"></p>
+      <span class="rmark" aria-hidden="true"></span>
+    </header>
+    <div class="rbody">
+      <section class="card" data-card="trend">
+        <h2 class="display">Across the record <span class="muted" id="trendGrain"></span></h2>
+        <p class="cardq">How much is being heard, and how does that change as the season turns?</p>
+        <p class="chfind" id="find-overview"></p>
+        <p class="lead">Every period on record at the current aggregation, <em>not</em> just the one in
+          scope &mdash; this is the only chart on the page that ignores the period slider, because a
+          single period cannot show you a trend. The highlighted bar is the period everything below is
+          scoped to; click any bar to move there. Counts follow the
+          <span class="tag">detection floor</span>: a species is counted in a period once it clears the
+          floor on one of that period's mornings, the same test the charts below use, so the highlighted
+          bar always equals the chapter under it.</p>
+        <div class="controls">
+          <span class="metseg" id="trendMetric" role="group" aria-label="Metric">
+            <button type="button" data-metric="calls" aria-pressed="true">Calls</button>
+            <button type="button" data-metric="species" aria-pressed="false">Species</button>
+          </span>
+          <span class="mutedhint" id="trendHint"></span>
+        </div>
+        <div class="plot" id="chart-trend"></div>
+      </section>
+      <section class="card" data-card="season">
+        <h2 class="display">Onset through the season</h2>
+        <p class="cardq">Does a species shift earlier or later as the year turns?</p>
+        <p class="chfind" id="find-season"></p>
+        <p class="lead">Each dot is one species on one morning: when it started, against the date.
+          This is the seasonal question &mdash; <em>does a species shift earlier or later as the year
+          turns?</em> Trend lines appear for species with &ge;4 mornings. Unlike the charts above this
+          one ignores the time scope and always shows <em>every</em> morning, because a season is
+          what it is measuring.</p>
+        <div class="controls"><div class="msel" id="seasonSel"></div></div>
+        <div class="plot" id="chart-season"></div>
+      </section>
+    </div>
+  </section>
+
+  <section class="rung" data-rung="selection">
+    <header class="rhead">
+      <span class="rnum">Rung 2</span>
+      <h2 class="rname">Selected period</h2>
+      <p class="rscope" id="scope-selection"></p>
+      <span class="rmark" aria-hidden="true"></span>
+    </header>
+    <div class="rbody">
+      <section class="card" data-card="period">
+        <h2 class="display">Calls by species</h2>
+        <p class="cardq">Who is heard most here, and how much of it is a handful of species?</p>
+        <p class="chfind" id="find-period"></p>
+        <p class="lead">Species in the <span class="tag">scoped period</span> ranked by number of
+          detections, showing the same set as <em>Who sings when</em> below so the two charts agree on
+          which birds are present. The axis is linear, so bar length is directly comparable &mdash; which
+          is why the tail looks thin: a few species really do account for most of what the recorder
+          hears. Counts are detections above the confidence floor, not individual birds, so a species
+          that repeats itself outranks one that calls once from three directions.</p>
+        <div class="plot" id="chart-period"></div>
+        <p class="tblnote" id="pdNote"></p>
+      </section>
+      <section class="card" data-card="timeline">
+        <h2 class="display">Who sings when</h2>
+        <p class="cardq">Who starts singing, and how long do they keep going?</p>
+        <p class="chfind" id="find-morning"></p>
+        <p class="lead">Each bar spans a species' vocal activity &mdash; onset (5th percentile of detection
+          times) to offset (95th) &mdash; in minutes from <span class="tag">civil dawn</span> (dashed line),
+          taken as the <em>median across the scoped period's mornings</em>. Darker bars are sung more
+          continuously; the tick marks the median busiest minute.</p>
+        <div class="plot" id="chart-timeline"></div>
+      </section>
+      <div class="pair">
+      <section class="card" data-card="ecdf">
+        <h2 class="display">Cumulative call distributions</h2>
+        <p class="cardq">How does the chorus build and fade across the window?</p>
+        <p class="chfind" id="find-shape"></p>
+        <p class="lead">The empirical CDF <em>F(t)</em> &mdash; share of a species' detections that have
+          occurred by each minute &mdash; averaged across the period's mornings (each morning a replicate).
+          Onset reads where a curve crosses 0.05, median song-time at 0.5, offset at 0.95.</p>
+        <div class="controls"><div class="msel" id="ecdfSel"></div></div>
+        <div class="plot" id="chart-ecdf"></div>
+      </section>
+      <section class="card" data-card="heat">
+        <h2 class="display">Occupancy across the morning</h2>
+        <p class="lead">Species &times; solar-minute. Colour is the fraction of the scoped period's mornings
+          a species was detected in each 5-minute bin &mdash; slide the time scope to watch the chorus shift.</p>
+        <div class="plot" id="chart-heat"></div>
+      </section>
+      </div>
+      <div class="pair">
+      <section class="card" data-card="temp">
+        <h2 class="display">Onset vs.&nbsp;temperature</h2>
+        <p class="cardq">Do they start earlier when it is warm, later when it rains?</p>
+        <p class="chfind" id="find-weather"></p>
+        <p class="lead">Each dot is a species on one morning: its onset (minutes from <span class="tag">civil
+          dawn</span>) against the temperature at dawn &mdash; the founding question, <em>does the chorus start
+          earlier on warm mornings?</em> A downward trend says yes. Per-species trend lines appear once a
+          species has &ge;4 mornings in the period; treat pooled patterns cautiously (weather confounds season).</p>
+        <div class="plot" id="chart-temp"></div>
+      </section>
+      <section class="card" data-card="rain">
+        <h2 class="display">Onset vs.&nbsp;rain</h2>
+        <p class="lead">Onset against total rainfall over the morning window (mm). Points sit at 0 on dry
+          mornings; a rightward shift on wet mornings would show birds starting later in the rain.</p>
+        <div class="plot" id="chart-rain"></div>
+      </section>
+      </div>
+      <section class="card" data-card="table">
+        <h2 class="display">Per-species table</h2>
+        <p class="cardq">What did each one actually do?</p>
+        <p class="chfind" id="find-species"></p>
+        <p class="lead">Aggregated over the scoped period: mornings present, total detections, and median
+          onset/offset/span/peak/occupancy (minutes from civil dawn).</p>
+        <div class="tableScroll"><table id="tbl"></table></div>
+      <p class="tblnote" id="tblNote"></p>
+      </section>
+    </div>
+  </section>
+
+  <section class="rung" data-rung="morning" hidden>
+    <header class="rhead">
+      <span class="rnum">Rung 3</span>
+      <h2 class="rname">Morning &amp; clip</h2>
+      <p class="rscope" id="scope-morning"></p>
+      <span class="rmark" aria-hidden="true"></span>
+    </header>
+    <div class="rbody">
+      <p class="rgate" id="rungGate" hidden></p>
+      <section class="card audio" id="audioCard">
     <h2 class="display">Listen</h2>
     <p class="lead" id="audioLead"></p>
     <div id="specWrap" hidden>
@@ -348,167 +513,9 @@
       </label>
     </div>
   </section>
-
-  <div class="chapters">
-
-  <section class="chapter" id="ch-overview">
-    <div class="rail">
-      <span class="chwhen">whole record</span>
-      <h2 class="chtitle">Overview</h2>
-      <p class="chq">How much is being heard, and how does that change as the season turns?</p>
-      <p class="chfind" id="find-overview"></p>
-    </div>
-    <div class="chbody">
-      <section class="card" data-card="trend">
-        <h2 class="display">Across the record <span class="muted" id="trendGrain"></span></h2>
-        <p class="lead">Every period on record at the current aggregation, <em>not</em> just the one in
-          scope &mdash; this is the only chart on the page that ignores the period slider, because a
-          single period cannot show you a trend. The highlighted bar is the period everything below is
-          scoped to; click any bar to move there. Counts follow the
-          <span class="tag">detection floor</span>: a species is counted in a period once it clears the
-          floor on one of that period's mornings, the same test the charts below use, so the highlighted
-          bar always equals the chapter under it.</p>
-        <div class="controls">
-          <span class="metseg" id="trendMetric" role="group" aria-label="Metric">
-            <button type="button" data-metric="calls" aria-pressed="true">Calls</button>
-            <button type="button" data-metric="species" aria-pressed="false">Species</button>
-          </span>
-          <span class="mutedhint" id="trendHint"></span>
-        </div>
-        <div class="plot" id="chart-trend"></div>
-      </section>
     </div>
   </section>
 
-  <section class="chapter" id="ch-period">
-    <div class="rail">
-      <span class="chwhen">selected period</span>
-      <h2 class="chtitle">Selected period</h2>
-      <p class="chq">Who is heard most here, and how much of it is a handful of species?</p>
-      <p class="chfind" id="find-period"></p>
-    </div>
-    <div class="chbody">
-      <section class="card" data-card="period">
-        <h2 class="display">Calls by species</h2>
-        <p class="lead">Species in the <span class="tag">scoped period</span> ranked by number of
-          detections, showing the same set as <em>Who sings when</em> below so the two charts agree on
-          which birds are present. The axis is linear, so bar length is directly comparable &mdash; which
-          is why the tail looks thin: a few species really do account for most of what the recorder
-          hears. Counts are detections above the confidence floor, not individual birds, so a species
-          that repeats itself outranks one that calls once from three directions.</p>
-        <div class="plot" id="chart-period"></div>
-        <p class="tblnote" id="pdNote"></p>
-      </section>
-    </div>
-  </section>
-
-  <section class="chapter" id="ch-morning">
-    <div class="rail">
-      <span class="chwhen">dawn &minus;2h</span>
-      <h2 class="chtitle">The first voices</h2>
-      <p class="chq">Who starts singing, and how long do they keep going?</p>
-      <p class="chfind" id="find-morning"></p>
-    </div>
-    <div class="chbody">
-      <section class="card" data-card="timeline">
-        <h2 class="display">Who sings when</h2>
-        <p class="lead">Each bar spans a species' vocal activity &mdash; onset (5th percentile of detection
-          times) to offset (95th) &mdash; in minutes from <span class="tag">civil dawn</span> (dashed line),
-          taken as the <em>median across the scoped period's mornings</em>. Darker bars are sung more
-          continuously; the tick marks the median busiest minute.</p>
-        <div class="plot" id="chart-timeline"></div>
-      </section>
-    </div>
-  </section>
-
-  <section class="chapter" id="ch-shape">
-    <div class="rail">
-      <span class="chwhen">dawn</span>
-      <h2 class="chtitle">The shape of a morning</h2>
-      <p class="chq">How does the chorus build and fade across the window?</p>
-      <p class="chfind" id="find-shape"></p>
-    </div>
-    <div class="chbody pair">
-      <section class="card" data-card="ecdf">
-        <h2 class="display">Cumulative call distributions</h2>
-        <p class="lead">The empirical CDF <em>F(t)</em> &mdash; share of a species' detections that have
-          occurred by each minute &mdash; averaged across the period's mornings (each morning a replicate).
-          Onset reads where a curve crosses 0.05, median song-time at 0.5, offset at 0.95.</p>
-        <div class="controls"><div class="msel" id="ecdfSel"></div></div>
-        <div class="plot" id="chart-ecdf"></div>
-      </section>
-      <section class="card" data-card="heat">
-        <h2 class="display">Occupancy across the morning</h2>
-        <p class="lead">Species &times; solar-minute. Colour is the fraction of the scoped period's mornings
-          a species was detected in each 5-minute bin &mdash; slide the time scope to watch the chorus shift.</p>
-        <div class="plot" id="chart-heat"></div>
-      </section>
-    </div>
-  </section>
-
-  <section class="chapter" id="ch-season">
-    <div class="rail">
-      <span class="chwhen">week to week</span>
-      <h2 class="chtitle">Through the season</h2>
-      <p class="chq">Does a species shift earlier or later as the year turns?</p>
-      <p class="chfind" id="find-season"></p>
-    </div>
-    <div class="chbody">
-      <section class="card" data-card="season">
-        <h2 class="display">Onset through the season</h2>
-        <p class="lead">Each dot is one species on one morning: when it started, against the date.
-          This is the seasonal question &mdash; <em>does a species shift earlier or later as the year
-          turns?</em> Trend lines appear for species with &ge;4 mornings. Unlike the charts above this
-          one ignores the time scope and always shows <em>every</em> morning, because a season is
-          what it is measuring.</p>
-        <div class="controls"><div class="msel" id="seasonSel"></div></div>
-        <div class="plot" id="chart-season"></div>
-      </section>
-    </div>
-  </section>
-
-  <section class="chapter" id="ch-weather">
-    <div class="rail">
-      <span class="chwhen">each morning</span>
-      <h2 class="chtitle">Against the weather</h2>
-      <p class="chq">Do they start earlier when it is warm, later when it rains?</p>
-      <p class="chfind" id="find-weather"></p>
-    </div>
-    <div class="chbody pair">
-      <section class="card" data-card="temp">
-        <h2 class="display">Onset vs.&nbsp;temperature</h2>
-        <p class="lead">Each dot is a species on one morning: its onset (minutes from <span class="tag">civil
-          dawn</span>) against the temperature at dawn &mdash; the founding question, <em>does the chorus start
-          earlier on warm mornings?</em> A downward trend says yes. Per-species trend lines appear once a
-          species has &ge;4 mornings in the period; treat pooled patterns cautiously (weather confounds season).</p>
-        <div class="plot" id="chart-temp"></div>
-      </section>
-      <section class="card" data-card="rain">
-        <h2 class="display">Onset vs.&nbsp;rain</h2>
-        <p class="lead">Onset against total rainfall over the morning window (mm). Points sit at 0 on dry
-          mornings; a rightward shift on wet mornings would show birds starting later in the rain.</p>
-        <div class="plot" id="chart-rain"></div>
-      </section>
-    </div>
-  </section>
-
-  <section class="chapter" id="ch-species">
-    <div class="rail">
-      <span class="chwhen">all mornings</span>
-      <h2 class="chtitle">Every species</h2>
-      <p class="chq">What did each one actually do?</p>
-      <p class="chfind" id="find-species"></p>
-    </div>
-    <div class="chbody">
-      <section class="card" data-card="table">
-        <h2 class="display">Per-species table</h2>
-        <p class="lead">Aggregated over the scoped period: mornings present, total detections, and median
-          onset/offset/span/peak/occupancy (minutes from civil dawn).</p>
-        <div class="tableScroll"><table id="tbl"></table></div>
-      <p class="tblnote" id="tblNote"></p>
-      </section>
-    </div>
-  </section>
   </div>
 
   <footer id="foot"></footer>
@@ -1032,12 +1039,38 @@ function wireTimeClicks(el, S){
   });
 }
 function updateAudioCard(S){
-  const card=document.getElementById("audioCard"); if(!card) return;
-  if(!hasAudio()){ card.hidden=true; return; }
-  card.hidden=false;
-  document.getElementById("audioLead").innerHTML = S.length===1
-    ? `Click a chart (snaps to the nearest call) or a table species to see its <strong>spectrogram</strong> on <strong>${S[0]}</strong>; use <strong>‹ ›</strong> to step through calls, ▶ to play.`
-    : `Set the time scope to a single day (<strong>Daily</strong>) to view spectrograms.`;
+  const rung=rungEl("morning"), card=document.getElementById("audioCard");
+  if(!rung || !card) return;
+  // No audio at all is the PUBLISHED site: recordings never leave the machine, so the
+  // payload carries none. That is not a rung waiting to be unlocked -- it does not exist
+  // there, and a permanently dead rung would be worse than no rung.
+  if(!hasAudio()){ rung.hidden=true; return; }
+  rung.hidden=false;
+  const one=S.length===1;
+  card.hidden=!one;
+  const gate=document.getElementById("rungGate");
+  if(gate){
+    gate.hidden=one;
+    if(!one) gate.innerHTML = `Audio is per morning, so this rung needs the scope narrowed to one. `+
+      `<button type="button" id="gotoMorning">Go to ${esc(S[S.length-1]||"the last morning")}</button>`;
+    const b=document.getElementById("gotoMorning");
+    if(b) b.onclick=()=>{ narrowToMorning(S[S.length-1]); };
+  }
+  const lead=document.getElementById("audioLead");
+  if(lead && one) lead.innerHTML =
+    `Click a chart (snaps to the nearest call) or a table species to see its <strong>spectrogram</strong> on <strong>${S[0]}</strong>; use <strong>‹ ›</strong> to step through calls, ▶ to play.`;
+}
+
+// Narrowing for the reader rather than telling them to go and do it: switch to Daily and
+// land on the morning they were already looking at.
+function narrowToMorning(day){
+  if(!day) return;
+  if(aggSel.value!=="day"){ aggSel.value="day"; periods=periodsFor("day");
+    slider.min=0; slider.max=Math.max(0,periods.length-1); slider.disabled=periods.length<=1; }
+  const i=periods.indexOf(day);
+  if(i>=0) slider.value=String(i);
+  renderAll(); syncSteppers();
+  const r=rungEl("morning"); if(r){ setRung("morning", false, true); r.scrollIntoView({behavior:"smooth", block:"start"}); }
 }
 
 const median = a => { const s=a.filter(v=>v!=null).sort((x,y)=>x-y), n=s.length;
@@ -1683,6 +1716,85 @@ function buildChips(){
   multiSelect("seasonSel", "season-sp", renderSeason, "Species");
 }
 
+/* ---- the ladder -----------------------------------------------------------------------
+   Four levels of information used to sit in seven chapters with no stated relationship to
+   the time scope, so the same slider appeared to mean three different things: the seasonal
+   chart ignored it, the overview used only its grain, and everything else used both. The
+   charts were right; the page just never said which level you were on. Each rung now states
+   its own scope, and there are only three possible relationships -- ignores it, is it, or
+   needs it narrowed. */
+const RUNG_KEY="dc.rungs";
+const RUNGS=(()=>{ try{ return JSON.parse(localStorage.getItem(RUNG_KEY)||"{}"); }catch(e){ return {}; } })();
+function saveRungs(){ try{ localStorage.setItem(RUNG_KEY, JSON.stringify(RUNGS)); }catch(e){} }
+function rungEl(k){ return document.querySelector(`.rung[data-rung="${k}"]`); }
+function setRung(k, collapsed, explicit){
+  const el=rungEl(k); if(!el) return;
+  el.classList.toggle("collapsed", !!collapsed);
+  if(explicit){ RUNGS[k]=!!collapsed; saveRungs(); }
+}
+document.querySelectorAll(".rung[data-rung]").forEach(r=>{
+  if(RUNGS[r.dataset.rung]) r.classList.add("collapsed");
+  const h=r.querySelector(".rhead"); if(!h) return;
+  h.setAttribute("role","button"); h.tabIndex=0;
+  const toggle=()=>{ const now=!r.classList.contains("collapsed");
+    setRung(r.dataset.rung, now, true);
+    // A rung renders into a hidden element as 0-wide, so anything reopened must be redrawn.
+    if(!now) renderAll(); };
+  h.addEventListener("click", toggle);
+  h.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); toggle(); } });
+});
+
+// The rung headers are sticky under the scope bar, whose height changes with wrapping.
+// Measure it rather than hard-coding, or the headers hide behind it on a narrow window.
+function syncBarHeight(){
+  const bar=document.querySelector(".scopebar"); if(!bar) return;
+  document.documentElement.style.setProperty("--barh", Math.round(bar.getBoundingClientRect().height)+"px");
+}
+
+// Invariant: every rung states what it is showing AND how it relates to the scope.
+function renderRungs(S){
+  const put=(k,html)=>{ const el=document.getElementById("scope-"+k); if(el) el.innerHTML=html||""; };
+  const m=meta, days=m.days;
+  put("season", `${days.length} morning${days.length===1?"":"s"}, ${days[0]} → ${days[days.length-1]}. `+
+    `<em>Ignores the period slider</em> — a season is what these charts measure.`);
+
+  const g=aggBySpecies(S);
+  const sp=Object.keys(g).filter(n=>g[n].some(r=>r.onset!=null)).length;
+  const det=Object.values(g).reduce((s,rs)=>s+rs.reduce((t,r)=>t+r.n,0),0);
+  const pkey=periods[Math.min(+slider.value, periods.length-1)] ?? periods[0];
+  put("selection", `${pkey||"—"} · ${S.length} morning${S.length===1?"":"s"} · `+
+    `${det.toLocaleString()} detections · ${sp} species above the floor. `+
+    `<em>This is the period slider</em>.`);
+
+  const one = S.length===1 ? S[0] : null;
+  put("morning", one
+    ? `${one}${DAWN[one]!=null?` · civil dawn ${secToClock(DAWN[one])}`:""} · `+
+      `${(AUDIO&&AUDIO[one]?AUDIO[one].length:0)} recording${(AUDIO&&AUDIO[one]&&AUDIO[one].length===1)?"":"s"}.`
+    : `<em>Needs the scope narrowed to one morning</em> — audio is per recording.`);
+}
+
+// Where you are, as a path you can click back up. Reads state; owns none of it.
+function renderCrumb(S){
+  const el=document.getElementById("crumb"); if(!el) return;
+  const pkey=periods[Math.min(+slider.value, periods.length-1)] ?? periods[0];
+  const one=S.length===1 ? S[0] : null;
+  const steps=[
+    {k:"season", t:"Season", on:true},
+    {k:"selection", t:pkey||"—", on:true},
+    {k:"morning", t: one || `${S.length} mornings`, on: !!one && hasAudio()},
+  ];
+  if(cur && cur.clip) steps.push({k:"morning", t:`${LABELSP[cur.anchorSi]||"clip"}`, on:true, last:true});
+  el.innerHTML = steps.map((s,i)=>
+    (i?`<span class="sep">›</span>`:``)+
+    `<button type="button" data-goto="${s.k}"${s.on?"":" disabled"}`+
+    `${i===steps.length-1?' aria-current="true"':''}>${esc(s.t)}</button>`).join("");
+  el.querySelectorAll("button[data-goto]").forEach(b=> b.onclick=()=>{
+    const r=rungEl(b.dataset.goto); if(!r) return;
+    setRung(b.dataset.goto, false, true); renderAll();
+    r.scrollIntoView({behavior:"smooth", block:"start"});
+  });
+}
+
 // Each chapter states what the data actually says, computed from the scoped period --
 // a narrative that ignored the numbers would be decoration. Empty text hides itself, so
 // a chapter with nothing to report says nothing rather than padding.
@@ -1772,7 +1884,8 @@ function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S)
   renderTrend(); renderPeriod(S); renderTimeline(S); renderEcdf(S); renderHeat(S); renderSeason();
   renderWeather(S,"t","chart-temp","temperature at dawn (°C)","temp");
   renderWeather(S,"r","chart-rain","rain over the window (mm)","rain");
-  renderTable(S); updateAudioCard(S); renderFindings(S); }
+  renderTable(S); updateAudioCard(S); renderFindings(S);
+  renderRungs(S); renderCrumb(S); syncBarHeight(); }
 
 // ---- card collapsing + settings ---------------------------------------------------------
 // Cards render into a hidden element as 0-wide, so anything opened has to be redrawn.
@@ -1863,10 +1976,13 @@ document.getElementById("autoCollapse").addEventListener("change", e=>{
   if(p) p.onclick=()=>apply(MIN_DET-1);
   if(n) n.onclick=()=>apply(MIN_DET+1);
 })();
+// Rungs and cards together: "Expand all" that left a rung shut would be a lie.
 document.getElementById("expandAll").addEventListener("click", ()=>{
+  document.querySelectorAll(".rung[data-rung]").forEach(r=>setRung(r.dataset.rung, false, true));
   document.querySelectorAll(".card[data-card]").forEach(c=>setCollapsed(c.dataset.card, false, true));
   renderAll(); });
 document.getElementById("collapseAll").addEventListener("click", ()=>{
+  document.querySelectorAll(".rung[data-rung]").forEach(r=>setRung(r.dataset.rung, true, true));
   document.querySelectorAll(".card[data-card]").forEach(c=>setCollapsed(c.dataset.card, true, true)); });
 applySettings();
 
