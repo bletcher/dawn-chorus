@@ -101,6 +101,10 @@ function ladder(src) {
     [!/<p class="lead">/.test(src.slice(src.indexOf('class="ladder"'), src.indexOf("<footer"))),
       "no card puts its method text back on the page"],
     [!src.includes('class="cardq"'), "the chapter questions, which restated the titles, are gone"],
+    // The heatmap's y domain was every species on record, so a quiet morning drew dozens of
+    // blank rows. It must be built from what the selection actually contains.
+    [/function renderHeat[\s\S]*?all\.filter\(n=>seen\.has\(n\)\)/.test(src),
+      "the heatmap's rows come from the selection, not the whole record"],
   ];
 }
 

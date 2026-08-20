@@ -779,7 +779,7 @@ TEMPLATE = r"""<!doctype html>
       <section class="card" data-card="heat">
         <h2 class="display">Occupancy across the morning</h2>
         <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
-        <div class="about" hidden><p>Species &times; solar-minute. Colour is the fraction of the selection's mornings a species was detected in each 5-minute bin. Drag the selection to watch the chorus shift.</p></div>
+        <div class="about" hidden><p>Species &times; solar-minute. Colour is the fraction of the selection's mornings a species was detected in each 5-minute bin. Only species heard in the selection get a row. This is presence, not phenology, so it lists a few species that <em>Who sings when</em> leaves out &mdash; ones heard too sparsely on any single morning to earn an onset.</p></div>
         <div class="plot" id="chart-heat"></div>
       </section>
       </div>
@@ -1987,12 +1987,20 @@ function renderEcdf(S){
 
 function renderHeat(S){
   const el=document.getElementById("chart-heat"); el.innerHTML="";
-  const names=meta.species, dIdx=S.map(d=>DAYIDX[d]);
-  if(!names.length || !dIdx.length){ el.innerHTML='<p class="empty">Not enough data for the heatmap.</p>'; return; }
-  const rows=[];
-  for(let si=0; si<names.length; si++) for(let bi=0; bi<NB; bi++){
-    let pres=0; for(const di of dIdx){ const a=BDS[di+"|"+si]; if(a && a[bi]>0) pres++; }
-    if(pres>0) rows.push({name:names[si], t:GRID[bi], occ:pres/dIdx.length}); }
+  const all=meta.species, dIdx=S.map(d=>DAYIDX[d]);
+  if(!all.length || !dIdx.length){ el.innerHTML='<p class="empty">Not enough data for the heatmap.</p>'; return; }
+  // Only species actually heard in the selection get a row. The domain used to be every
+  // species on record, so a single quiet morning drew 41 blank rows among 9 real ones in a
+  // chart 1080px tall whatever you selected -- the emptiness read as missing data rather
+  // than as a species that simply was not there.
+  const rows=[], seen=new Set();
+  for(let si=0; si<all.length; si++){
+    for(let bi=0; bi<NB; bi++){
+      let pres=0; for(const di of dIdx){ const a=BDS[di+"|"+si]; if(a && a[bi]>0) pres++; }
+      if(pres>0){ rows.push({name:all[si], t:GRID[bi], occ:pres/dIdx.length}); seen.add(all[si]); } }
+  }
+  const names=all.filter(n=>seen.has(n));         // keeps the earliest-singer-first order
+  if(!names.length){ el.innerHTML='<p class="empty">No species detected in this selection.</p>'; return; }
   el.append(Plot.plot({ width:W(el), height:names.length*20+80, marginLeft:ML(el,true), marginRight:26, style:plotStyle(),
     x:xAxis({grid:false}), y:{domain:names, label:null, tickFormat:n=>spName(n,el)},
     color:{type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")], legend:true, label:"fraction of the period's mornings singing"},
