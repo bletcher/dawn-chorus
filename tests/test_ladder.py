@@ -28,16 +28,42 @@ SCRIPT = Path(__file__).resolve().parent.parent / "tools" / "check_ui.js"
 
 @pytest.fixture(scope="module")
 def page(tmp_path_factory):
+    """Twelve mornings spanning three ISO weeks and a month boundary.
+
+    The brush has to be exercised over a record wide enough to hold ranges, and across the
+    boundaries where snapping is easiest to get wrong -- a week that straddles the end of a
+    month is exactly where an off-by-one in periodBounds would hide.
+    """
     src = tmp_path_factory.mktemp("results")
-    lines = ["Start (s),End (s),Scientific name,Common name,Confidence"]
-    for i, o in enumerate([37, 61, 62, 149, 210, 211, 640, 1811, 3007, 5400]):
-        lines.append(f"{o}.0,{o+3}.0,Turdus migratorius,American Robin,{0.55 + (i % 4) * 0.08:.2f}")
-    (src / "20260517_043000.BirdNET.results.csv").write_text("\n".join(lines) + "\n",
-                                                            encoding="utf-8")
+    offs = [37, 61, 62, 149, 210, 211, 640, 1811, 3007, 5400]
+    for day in ("20260525", "20260526", "20260527", "20260529", "20260530", "20260531",
+                "20260601", "20260602", "20260604", "20260605", "20260608", "20260609"):
+        lines = ["Start (s),End (s),Scientific name,Common name,Confidence"]
+        for i, o in enumerate(offs):
+            lines.append(f"{o}.0,{o+3}.0,Turdus migratorius,American Robin,"
+                         f"{0.55 + (i % 4) * 0.08:.2f}")
+        (src / f"{day}_043000.BirdNET.results.csv").write_text("\n".join(lines) + "\n",
+                                                              encoding="utf-8")
     out = tmp_path_factory.mktemp("ladder") / "dash.html"
     build_site.main(["--from-analyzer", str(src), "--out", str(out),
                      "--lat", "42.5372", "--lon", "-72.5317", "--tz", "America/New_York"])
     return out
+
+
+def test_a_single_morning_page_still_passes(tmp_path):
+    """A station on its first morning is a valid page, not a broken one."""
+    src = tmp_path / "one"
+    src.mkdir()
+    lines = ["Start (s),End (s),Scientific name,Common name,Confidence"]
+    for o in (37, 61, 149, 210, 640):
+        lines.append(f"{o}.0,{o+3}.0,Turdus migratorius,American Robin,0.71")
+    (src / "20260517_043000.BirdNET.results.csv").write_text("\n".join(lines) + "\n",
+                                                            encoding="utf-8")
+    out = tmp_path / "one.html"
+    build_site.main(["--from-analyzer", str(src), "--out", str(out),
+                     "--lat", "42.5372", "--lon", "-72.5317", "--tz", "America/New_York"])
+    r = subprocess.run(["node", str(SCRIPT), str(out)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
 
 
 def test_ladder_and_audio_states(page):

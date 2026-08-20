@@ -3,7 +3,7 @@ Build a self-contained dawn-chorus dashboard (Observable Plot) from a detection 
 
 Runs the dawnchorus pipeline, then writes a single HTML file with the data embedded and
 interactive charts, all governed by one global **time scope** (Aggregate: day/week/month/
-year + a period slider). Move the slider and every chart recomputes for that set of mornings:
+year + a brushed range on the record strip). Move the selection and every chart recomputes for it:
   * Dawn timeline   - median onset->offset per species, coloured by median occupancy
   * Cumulative call distributions (ECDF) - mean of the period's per-morning curves
   * Occupancy heatmap - species x solar-minute, fraction of the period's mornings singing
@@ -474,7 +474,7 @@ TEMPLATE = r"""<!doctype html>
   /* The floor's domain is FIXED (1-20), so its track is too. A flexible track gets
      re-measured whenever the readout beside it changes width -- and that readout changes on
      every drag -- so the right stepper would creep sideways under the cursor you were
-     using it with. The period slider above keeps flexing: its domain grows with the archive. */
+     using it with. (The detection floor is the only range input left in the bar.) */
   label.ctl.fixed{flex:none}
   label.ctl.fixed input[type=range]{flex:none; width:210px; min-width:0}
   /* Same reason, one level in: 5 -> 20 must not shove the counts along. */
@@ -570,7 +570,14 @@ TEMPLATE = r"""<!doctype html>
   .strip:hover .bar:not(.in){opacity:.62}
   .strip .sel{fill:var(--accent); opacity:.10}
   .strip .selline{stroke:var(--accent); stroke-width:1.5; opacity:.55}
+  .strip .grip{fill:var(--accent); opacity:.9}
+  .strip.dragging{cursor:grabbing}
+  .strip.dragging .bar{transition:none}
   .strip:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .wholebtn{font-size:12.5px; padding:4px 10px}
+  .wholebtn:disabled{opacity:.4; cursor:default}
+  /* A coarse pointer needs a bigger grip than a mouse does. */
+  @media (pointer:coarse){ .strip{height:56px} .strip .grip{opacity:1} }
   @media (max-width:720px){ .striprow .metseg{order:3} .strip{min-width:140px} }
   section.card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px 18px 8px; margin-bottom:20px; box-shadow:var(--shadow)}
   .card h2{font-size:19px; margin:0 0 3px; letter-spacing:-.01em}
@@ -696,22 +703,21 @@ TEMPLATE = r"""<!doctype html>
       <span class="scopehint" id="stripHint"></span>
     </div>
     <div class="scoperow">
-      <span class="eyebrow">Time&nbsp;scope</span>
-      <label class="ctl">Aggregate
-        <select id="aggSel">
-          <option value="day">Daily</option>
-          <option value="week">Weekly</option>
-          <option value="month">Monthly</option>
-          <option value="year">Yearly</option>
+      <span class="eyebrow">Selection</span>
+      <label class="ctl">Snap&nbsp;to
+        <select id="snapSel" title="Where the selection's edges land when you drag">
+          <option value="day">Morning</option>
+          <option value="week">Week</option>
+          <option value="month">Month</option>
+          <option value="year">Year</option>
+          <option value="free">Free</option>
         </select>
       </label>
-      <label class="ctl grow">Period
-        <button type="button" class="pstep" id="perPrev" aria-label="previous period" title="previous period">&lsaquo;</button>
-        <input type="range" id="periodSlider" min="0" max="0" step="1" value="0" aria-label="Period">
-        <button type="button" class="pstep" id="perNext" aria-label="next period" title="next period">&rsaquo;</button>
-      </label>
+      <button type="button" class="pstep" id="perPrev" aria-label="earlier" title="earlier">&lsaquo;</button>
+      <button type="button" class="pstep" id="perNext" aria-label="later" title="later">&rsaquo;</button>
       <span class="periodlabel" id="periodLabel"></span>
-      <span class="scopehint">scopes every chart below</span>
+      <button type="button" class="theme wholebtn" id="wholeRecord">Whole&nbsp;record</button>
+      <span class="scopehint">drag on the record above &mdash; scopes every chart below</span>
     </div>
     <div class="scoperow">
       <span class="eyebrow">Detection&nbsp;floor</span>
@@ -741,7 +747,7 @@ TEMPLATE = r"""<!doctype html>
         <p class="cardq">How much is being heard, and how does that change as the season turns?</p>
         <p class="chfind" id="find-overview"></p>
         <p class="lead">Every period on record at the current aggregation, <em>not</em> just the one in
-          scope &mdash; this is the only chart on the page that ignores the period slider, because a
+          scope &mdash; this is the only chart on the page that ignores the selection, because a
           single period cannot show you a trend. The highlighted bar is the period everything below is
           scoped to; click any bar to move there. Counts follow the
           <span class="tag">detection floor</span>: a species is counted in a period once it clears the
@@ -759,7 +765,7 @@ TEMPLATE = r"""<!doctype html>
         <p class="lead">Each dot is one species on one morning: when it started, against the date.
           This is the seasonal question &mdash; <em>does a species shift earlier or later as the year
           turns?</em> Trend lines appear for species with &ge;4 mornings. Unlike the charts above this
-          one ignores the time scope and always shows <em>every</em> morning, because a season is
+          one ignores the selection and always shows <em>every</em> morning, because a season is
           what it is measuring.</p>
         <div class="controls"><div class="msel" id="seasonSel"></div></div>
         <div class="plot" id="chart-season"></div>
@@ -812,7 +818,7 @@ TEMPLATE = r"""<!doctype html>
       <section class="card" data-card="heat">
         <h2 class="display">Occupancy across the morning</h2>
         <p class="lead">Species &times; solar-minute. Colour is the fraction of the scoped period's mornings
-          a species was detected in each 5-minute bin &mdash; slide the time scope to watch the chorus shift.</p>
+          a species was detected in each 5-minute bin &mdash; drag the selection to watch the chorus shift.</p>
         <div class="plot" id="chart-heat"></div>
       </section>
       </div>
@@ -917,7 +923,7 @@ TEMPLATE = r"""<!doctype html>
     <div class="setrow">
       <b>Detection floor</b>
       <p class="fine" style="margin:0">The <b>Minimum detections per morning</b> slider is in the
-        toolbar, next to Time scope, because its effect is the thing worth watching: a species
+        toolbar, next to the selection controls, because its effect is the thing worth watching: a species
         needs this many detections in one morning's window before that morning gets an onset, and
         a species with no qualifying morning leaves <em>Who sings when</em>, the cumulative curves
         and the seasonal trend entirely. Below the floor a morning still counts toward totals and
@@ -954,9 +960,19 @@ TEMPLATE = r"""<!doctype html>
     <p>Every chart plots a species' morning singing in <b>solar time</b> — minutes from
       <span class="tag">civil dawn</span> (the dashed line at 0) — so mornings weeks apart line up.</p>
 
-    <h3>Time scope</h3>
-    <p><b>Aggregate</b> (Daily / Weekly / Monthly / Yearly) plus the <b>Period</b> slider pick a set of
-      mornings, and <b>every chart recomputes</b> for them. Slide through time to watch the chorus shift.</p>
+    <h3>Selecting time</h3>
+    <p>The strip at the top is the whole record, one bar per morning. <b>Drag across it</b> to select a
+      range, click a bar for one morning, drag an edge to resize or the middle to slide the window along.
+      <b>Snap to</b> decides where the edges land &mdash; Morning, Week, Month, Year, or Free for any range
+      you like. <b>Every chart below recomputes</b> for whatever is selected.</p>
+    <p>The strip is a tab stop: arrow keys move the selection, shift+arrows resize it, Home and End jump
+      to the first and last mornings, Escape selects everything.</p>
+
+    <h3>The four levels</h3>
+    <p>Charts are grouped into rungs, and each rung's header says what it is showing and how it relates to
+      the selection. <b>Season</b> ignores the selection &mdash; a season is what those charts measure.
+      <b>Selected period</b> is the selection. <b>Morning &amp; clip</b> needs it narrowed to a single
+      morning, because audio is per recording.</p>
 
     <h3>The charts</h3>
     <ul>
@@ -1392,10 +1408,10 @@ function updateAudioCard(S){
 // clicking the strip should scope the page, not yank it down to the audio player.
 function narrowToMorning(day, goListen){
   if(!day) return;
-  if(aggSel.value!=="day"){ aggSel.value="day"; periods=periodsFor("day");
-    slider.min=0; slider.max=Math.max(0,periods.length-1); slider.disabled=periods.length<=1; }
-  const i=periods.indexOf(day);
-  if(i>=0) slider.value=String(i);
+  const i=meta.days.indexOf(day); if(i<0) return;
+  if(SNAP!=="day" && SNAP!=="free"){ SNAP="day"; localStorage.setItem(SNAP_KEY, SNAP);
+    if(snapSel) snapSel.value=SNAP; periods=periodsFor(grain()); }
+  setSel(i, i, {snap:false});
   renderAll(); syncSteppers();
   if(!goListen) return;
   const r=rungEl("morning");
@@ -1411,18 +1427,64 @@ function refreshColors(){ const c=seriesColors();
 function plotStyle(){ return {background:"transparent", color:css("--ink"), fontSize:"12.5px"}; }
 function W(el){ return Math.max(300, el.clientWidth || 900); }
 
-/* ---- global time scope ---- */
-const aggSel = document.getElementById("aggSel");
-const slider = document.getElementById("periodSlider");
+/* ---- the global selection ---- */
+/* The selection is a RANGE of mornings, not an index into a bucket list.
+   It used to be (aggregation, period index), which could only ever name one whole bucket --
+   so "the three mornings either side of the storm" was not expressible. SEL holds inclusive
+   indices into meta.days and the Snap control decides where its edges are allowed to land;
+   Snap = Week reproduces the old weekly slider exactly, which is the equivalence the
+   check_ui harness asserts rather than assumes. */
+const SNAP_KEY="dc_snap";
+let SNAP=(()=>{ const v=localStorage.getItem(SNAP_KEY);
+  return ["day","week","month","year","free"].includes(v) ? v : "day"; })();
+let SEL={a:0, b:0};
+const nDays = () => meta.days.length;
+const grain = () => SNAP==="free" ? "day" : SNAP;
+// Everything downstream still asks "what grain?", including the check_phen harness, so the
+// old name keeps working and always answers with a real level -- never "free".
+const aggSel = { get value(){ return grain(); } };
+const snapSel = document.getElementById("snapSel");
 let periods = [];
 function periodsFor(level){ const out=[], seen=new Set();
   meta.days.forEach(d=>{ const k=day_keys[d][level]; if(!seen.has(k)){ seen.add(k); out.push(k); } });
   return out; }
-function scopedDays(){ const level=aggSel.value, pkey=periods[Math.min(+slider.value, periods.length-1)] ?? periods[0];
-  return meta.days.filter(d=>day_keys[d][level]===pkey); }
-function rebuildPeriods(){ periods = periodsFor(aggSel.value);
-  slider.min=0; slider.max=Math.max(0, periods.length-1); slider.value=periods.length-1;
-  slider.disabled = periods.length<=1; renderAll(); syncSteppers(); }
+function scopedDays(){ return meta.days.slice(SEL.a, SEL.b+1); }
+function daysOfPeriod(k){ const l=grain(); return meta.days.filter(d=>day_keys[d][l]===k); }
+// Index range of the period containing day i. Periods are contiguous runs because meta.days
+// is sorted, so a scan outward is exact and cheap.
+function periodBounds(i){
+  const l=grain(), k=day_keys[meta.days[i]][l];
+  let a=i, b=i;
+  while(a>0 && day_keys[meta.days[a-1]][l]===k) a--;
+  while(b<nDays()-1 && day_keys[meta.days[b+1]][l]===k) b++;
+  return [a,b];
+}
+function snapRange(a,b){ return SNAP==="free" ? [a,b] : [periodBounds(a)[0], periodBounds(b)[1]]; }
+function setSel(a, b, opts){
+  const o=opts||{}, n=nDays();
+  a=Math.max(0, Math.min(n-1, a)); b=Math.max(0, Math.min(n-1, b));
+  if(a>b){ const t=a; a=b; b=t; }
+  if(o.snap!==false) { const r=snapRange(a,b); a=r[0]; b=r[1]; }
+  if(a===SEL.a && b===SEL.b) return false;
+  SEL={a,b}; return true;
+}
+function selLabel(){
+  const d=meta.days, n=SEL.b-SEL.a+1;
+  if(!d.length) return "—";
+  if(SNAP!=="free" && SNAP!=="day"){
+    const ks=[...new Set(d.slice(SEL.a,SEL.b+1).map(x=>day_keys[x][grain()]))];
+    if(ks.length===1) return ks[0];
+  }
+  return n===1 ? d[SEL.a] : `${d[SEL.a]} → ${d[SEL.b]}`;
+}
+// Landing on the most recent period matches what the old slider did on load.
+function rebuildPeriods(){
+  periods = periodsFor(grain());
+  if(!periods.length){ SEL={a:0,b:0}; renderAll(); syncSteppers(); return; }
+  const last=daysOfPeriod(periods[periods.length-1]);
+  SEL={a:meta.days.indexOf(last[0]), b:meta.days.indexOf(last[last.length-1])};
+  renderAll(); syncSteppers();
+}
 
 function renderSubline(){ const m=meta, loc=(m.lat!=null&&m.lon!=null)?`${m.lat.toFixed(2)}, ${m.lon.toFixed(2)}`:"";
   document.getElementById("subline").innerHTML =
@@ -1510,7 +1572,17 @@ function renderStrip(S){
       `opacity="${on?1:.42}"><title>${esc(d.key)} — ${d.calls.toLocaleString()} detections, `+
       `${d.species} species${on?" (in scope)":" · click to scope here"}</title></rect>`;
   }).join("");
-  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${selRect}${bars}</svg>`;
+  // Grips: drawn 7px, grabbed within 12px. The target is bigger than the mark, always.
+  const grips = lo>=0
+    ? [lo*step, (hi+1)*step].map(x=>
+        `<rect class="grip" x="${(x-3.5).toFixed(1)}" y="${(H*0.18).toFixed(1)}" width="7" `+
+        `height="${(H*0.64).toFixed(1)}" rx="2.5"></rect>`).join("")
+    : "";
+  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">`+
+    `${selRect}${bars}${grips}</svg>`;
+  host.setAttribute("aria-label",
+    `Record: ${rows.length} mornings. Selected ${selLabel()}. `+
+    `Arrow keys move the selection, shift+arrows resize, Escape selects everything.`);
 
   // Orientation, not a headline. A total here would be day-grain and so would NOT match
   // Rung 1's total at a coarser grain -- species are sub-additive across periods, because
@@ -1521,22 +1593,120 @@ function renderStrip(S){
   if(hint){ const best=rows.reduce((a,b)=> b[metric]>a[metric]?b:a, rows[0]||{key:"—"});
     hint.textContent = `${rows.length} morning${rows.length===1?"":"s"} · busiest ${best.key} · click to scope`; }
 }
-// Clicking the strip scopes to that morning. The whole point of putting the record on
-// screen permanently is being able to see a spike and go straight to it.
-(()=>{ const host=document.getElementById("strip"); if(!host) return;
-  host.addEventListener("click", ev=>{
-    const rows=stripRows(); if(!rows.length) return;
-    const r=host.getBoundingClientRect();
-    const i=Math.max(0, Math.min(rows.length-1,
-      Math.floor((ev.clientX-r.left-4)/Math.max(1,(r.width-8))*rows.length)));
-    narrowToMorning(rows[i].key);
+/* ---- the brush ----------------------------------------------------------------------
+   Click a morning, drag a range, drag an edge to resize, drag the middle to pan. The old
+   period slider is the special case where the width is locked to one snapped period, which
+   is why it could be retired rather than kept alongside.
+
+   Redraw budget: a drag would re-render every chart on every frame if you let it. Live work
+   is arithmetic over `summary` and one small SVG; the Plot charts are throttled; the ones
+   that loop the bin grid per species wait for release. Rung 1 is never redrawn during a
+   drag at all -- it does not depend on the selection, and saying so is the point of Rung 1. */
+const EDGE_PX = 12;                          // resize grab zone; bigger than the 7px drawn grip
+function stripGeom(host){
+  const r=host.getBoundingClientRect(), n=Math.max(1, nDays());
+  const x0=r.left+4, w=Math.max(1, r.width-8);
+  return {x0, w, n, step:w/n,
+          idx: px => Math.max(0, Math.min(n-1, Math.floor((px-x0)/w*n))),
+          at:  i  => x0 + i*(w/n)};
+}
+let dragRAF=0, cheapTimer=0;
+function renderLive(){
+  if(dragRAF) return;
+  dragRAF=requestAnimationFrame(()=>{ dragRAF=0;
+    const S=scopedDays();
+    renderStrip(S); updateScopeLabel(S); renderCrumb(S); renderRungs(S); syncSteppers(); });
+}
+function renderCheapSoon(){
+  clearTimeout(cheapTimer);
+  cheapTimer=setTimeout(()=>{ const S=scopedDays();
+    renderPeriod(S); renderTimeline(S); renderTable(S); renderFindings(S); }, 90);
+}
+(()=>{
+  const host=document.getElementById("strip"); if(!host) return;
+  let mode=null, anchor=0, orig=null, startX=0, moved=false;
+
+  host.addEventListener("pointerdown", ev=>{
+    if(!nDays() || ev.button) return;
+    const g=stripGeom(host), i=g.idx(ev.clientX);
+    const L=g.at(SEL.a), R=g.at(SEL.b+1);
+    startX=ev.clientX; moved=false; orig={...SEL};
+    if(Math.abs(ev.clientX-L)<=EDGE_PX){ mode="left"; anchor=SEL.b; }
+    else if(Math.abs(ev.clientX-R)<=EDGE_PX){ mode="right"; anchor=SEL.a; }
+    else if(i>=SEL.a && i<=SEL.b){ mode="pan"; anchor=i; }
+    else { mode="new"; anchor=i; setSel(i,i); renderLive(); renderCheapSoon(); }
+    host.setPointerCapture(ev.pointerId);
+    host.classList.add("dragging");
+    ev.preventDefault();
+  });
+
+  host.addEventListener("pointermove", ev=>{
+    if(!mode) return;
+    if(Math.abs(ev.clientX-startX)>3) moved=true;
+    const g=stripGeom(host), i=g.idx(ev.clientX);
+    let changed=false;
+    if(mode==="pan"){
+      const w=orig.b-orig.a, d=i-anchor;
+      let a=orig.a+d; a=Math.max(0, Math.min(nDays()-1-w, a));
+      changed=setSel(a, a+w, {snap:false});          // panning must not re-snap and stick
+    } else if(mode==="left" || mode==="right"){
+      changed=setSel(Math.min(anchor,i), Math.max(anchor,i));
+    } else {
+      changed=setSel(Math.min(anchor,i), Math.max(anchor,i));
+    }
+    if(changed){ renderLive(); renderCheapSoon(); }
+  });
+
+  const finish=ev=>{
+    if(!mode) return;
+    // A drag under 4px is a click, so a slightly unsteady hand still selects one morning
+    // rather than an accidental two-day range.
+    if(mode==="new" && !moved) setSel(anchor, anchor);
+    if(mode==="pan") setSel(SEL.a, SEL.b);           // re-snap once, at the end
+    mode=null; host.classList.remove("dragging");
+    try{ host.releasePointerCapture(ev.pointerId); }catch(e){}
+    clearTimeout(cheapTimer); renderAll(); syncSteppers();
+  };
+  host.addEventListener("pointerup", finish);
+  host.addEventListener("pointercancel", finish);
+  host.addEventListener("dblclick", ()=>{ setSel(0, nDays()-1, {snap:false}); renderAll(); syncSteppers(); });
+
+  // Keyboard: one tab stop, and every drag gesture has an equivalent.
+  host.tabIndex=0;
+  host.addEventListener("keydown", ev=>{
+    const n=nDays(); if(!n) return;
+    let done=true;
+    if(ev.key==="ArrowLeft")       ev.shiftKey ? setSel(SEL.a, SEL.b-1) : stepSelection(-1);
+    else if(ev.key==="ArrowRight") ev.shiftKey ? setSel(SEL.a, SEL.b+1) : stepSelection(1);
+    else if(ev.key==="Home")       setSel(0,0);
+    else if(ev.key==="End")        setSel(n-1,n-1);
+    else if(ev.key==="Escape")     setSel(0,n-1,{snap:false});
+    else done=false;
+    if(done){ ev.preventDefault(); renderAll(); syncSteppers(); }
   });
 })();
+
+// Steppers move by whole periods when snapped, and by the selection's own width when free --
+// both are "the next one along", which is what the old ‹ › did.
+function stepSelection(delta){
+  if(!nDays()) return false;
+  if(SNAP==="free"){ const w=SEL.b-SEL.a+1;
+    if(SEL.a+delta*w<0 || SEL.b+delta*w>nDays()-1) return false;
+    return setSel(SEL.a+delta*w, SEL.b+delta*w, {snap:false}); }
+  const pi = d => periods.indexOf(day_keys[meta.days[d]][grain()]);
+  const p0=pi(SEL.a), p1=pi(SEL.b), span=p1-p0, n0=p0+delta;
+  if(n0<0 || n0+span>periods.length-1) return false;
+  const first=daysOfPeriod(periods[n0]), last=daysOfPeriod(periods[n0+span]);
+  return setSel(meta.days.indexOf(first[0]), meta.days.indexOf(last[last.length-1]), {snap:false});
+}
 
 function renderTrend(){
   const el=document.getElementById("chart-trend"); el.innerHTML="";
   const level=aggSel.value, rows=trendRows(), metric=TREND_METRIC;
-  const cur=periods[Math.min(+slider.value, periods.length-1)] ?? periods[0];
+  // A selection can straddle several periods now, so "the current bar" is any bar the
+  // selection touches -- highlighting only one would under-report what is in scope.
+  const inSel=new Set(scopedDays().map(d=>day_keys[d][level]));
+  const cur=null;
   const g=document.getElementById("trendGrain");
   if(g) g.textContent = `· by ${PERIOD_WORD[level]||level}`;
   const hint=document.getElementById("trendHint");
@@ -1571,13 +1741,13 @@ function renderTrend(){
       // series: it says "this is what everything below is showing", which is the only
       // reason the two chapters can be read together.
       Plot.barY(rows, {x:"key", y:metric, rx:2, insetLeft:.5, insetRight:.5,
-        fill:d=>d.key===cur?css("--dawn"):css("--accent")}),
+        fill:d=>inSel.has(d.key)?css("--dawn"):css("--accent")}),
       Plot.ruleY([0], {stroke:css("--line")}),
       Plot.tip(rows, Plot.pointerX({x:"key", y:metric, title:d=>
         `${d.key}\n${d.calls.toLocaleString()} detections · ${d.species} species\n`+
         `${d.mornings} morning${d.mornings===1?"":"s"}`+
         (d.offSp ? `\n${d.offSp} species below the floor (${d.offCalls.toLocaleString()} detections) not counted` : ``)+
-        (d.key===cur?"\n(in scope)":"\nclick to scope here")}))
+        (inSel.has(d.key)?"\n(in scope)":"\nclick to scope here")}))
     ]}));
   wirePeriodClicks(el, names);
 }
@@ -1596,13 +1766,15 @@ function wirePeriodClicks(el, names){
     let hit=null, best=Infinity;
     for(const k of names){ const c=xs.apply(k)+(xs.bandwidth||0)/2, d=Math.abs(c-px);
       if(d<best){ best=d; hit=k; } }
-    const i=periods.indexOf(hit);
-    if(i>=0 && i!==+slider.value){ slider.value=String(i); renderAll(); syncSteppers(); }
+    const d=daysOfPeriod(hit);
+    if(d.length && setSel(meta.days.indexOf(d[0]), meta.days.indexOf(d[d.length-1]), {snap:false})){
+      renderAll(); syncSteppers(); }
   });
 }
 
-function updateScopeLabel(S){ const pkey=periods[Math.min(+slider.value, periods.length-1)] ?? periods[0];
-  document.getElementById("periodLabel").textContent = `${pkey||"—"} · ${S.length} morning${S.length!==1?"s":""}`; }
+function updateScopeLabel(S){
+  document.getElementById("periodLabel").textContent =
+    `${selLabel()} · ${S.length} morning${S.length!==1?"s":""}`; }
 
 /* ---- charts (all take the scoped set of mornings S) ---- */
 // ---- settings -------------------------------------------------------------------------
@@ -2149,15 +2321,14 @@ function renderRungs(S){
   const put=(k,html)=>{ const el=document.getElementById("scope-"+k); if(el) el.innerHTML=html||""; };
   const m=meta, days=m.days;
   put("season", `${days.length} morning${days.length===1?"":"s"}, ${days[0]} → ${days[days.length-1]}. `+
-    `<em>Ignores the period slider</em> — a season is what these charts measure.`);
+    `<em>Ignores the selection</em> — a season is what these charts measure.`);
 
   const g=aggBySpecies(S);
   const sp=Object.keys(g).filter(n=>g[n].some(r=>r.onset!=null)).length;
   const det=Object.values(g).reduce((s,rs)=>s+rs.reduce((t,r)=>t+r.n,0),0);
-  const pkey=periods[Math.min(+slider.value, periods.length-1)] ?? periods[0];
-  put("selection", `${pkey||"—"} · ${S.length} morning${S.length===1?"":"s"} · `+
+  put("selection", `${selLabel()} · ${S.length} morning${S.length===1?"":"s"} · `+
     `${det.toLocaleString()} detections · ${sp} species above the floor. `+
-    `<em>This is the period slider</em>.`);
+    `<em>This is the brushed selection</em>.`);
 
   const one = S.length===1 ? S[0] : null;
   put("morning", one
@@ -2169,11 +2340,10 @@ function renderRungs(S){
 // Where you are, as a path you can click back up. Reads state; owns none of it.
 function renderCrumb(S){
   const el=document.getElementById("crumb"); if(!el) return;
-  const pkey=periods[Math.min(+slider.value, periods.length-1)] ?? periods[0];
   const one=S.length===1 ? S[0] : null;
   const steps=[
     {k:"season", t:"Season", on:true},
-    {k:"selection", t:pkey||"—", on:true},
+    {k:"selection", t:selLabel(), on:true},
     {k:"morning", t: one || `${S.length} mornings`, on: !!one && hasAudio()},
   ];
   if(cur && cur.clip) steps.push({k:"morning", t:`${LABELSP[cur.anchorSi]||"clip"}`, on:true, last:true});
@@ -2382,22 +2552,26 @@ document.getElementById("collapseAll").addEventListener("click", ()=>{
   document.querySelectorAll(".card[data-card]").forEach(c=>setCollapsed(c.dataset.card, true, true)); });
 applySettings();
 
-aggSel.onchange = rebuildPeriods;
-slider.oninput = ()=>{ renderAll(); syncSteppers(); };
+if(snapSel){ snapSel.value=SNAP;
+  snapSel.onchange = ()=>{ SNAP=snapSel.value; localStorage.setItem(SNAP_KEY, SNAP);
+    periods=periodsFor(grain());
+    // Re-snap what is already selected rather than jumping somewhere else: changing the
+    // grain should widen or tighten the window you are looking at, not move it.
+    const r=snapRange(SEL.a, SEL.b); SEL={a:r[0], b:r[1]};
+    renderAll(); syncSteppers(); }; }
+const wholeBtn=document.getElementById("wholeRecord");
+if(wholeBtn) wholeBtn.onclick=()=>{ setSel(0, nDays()-1, {snap:false}); renderAll(); syncSteppers(); };
 // Stepping one period at a time: a slider is poor for "the next morning", which is the
 // most common move when reading day by day.
 function syncSteppers(){
   const a=document.getElementById("perPrev"), b=document.getElementById("perNext");
   if(!a||!b) return;
-  const v=+slider.value, max=+slider.max;
-  a.disabled = slider.disabled || v<=0;
-  b.disabled = slider.disabled || v>=max;
+  a.disabled = SEL.a<=0;
+  b.disabled = SEL.b>=nDays()-1;
+  const w=document.getElementById("wholeRecord");
+  if(w) w.disabled = SEL.a===0 && SEL.b===nDays()-1;
 }
-function stepPeriod(delta){
-  const v=Math.max(0, Math.min(+slider.max, +slider.value + delta));
-  if(v===+slider.value) return;
-  slider.value=String(v); renderAll(); syncSteppers();
-}
+function stepPeriod(delta){ if(stepSelection(delta)){ renderAll(); syncSteppers(); } }
 document.getElementById("perPrev").onclick = ()=>stepPeriod(-1);
 document.getElementById("perNext").onclick = ()=>stepPeriod(+1);
 document.getElementById("playBtn").onclick = playClip;

@@ -93,14 +93,19 @@ function strip(src, DATA) {
     grabFn(src, "quantileSorted") + "\n" + grabFn(src, "summaryAt") + "\nreturn summaryAt;")(...Object.values(pctx));
 
   const draw = (level, S, metric, floor) => {
-    const host = { clientWidth: 600, clientHeight: 46, innerHTML: "" };
+    const host = { clientWidth: 600, clientHeight: 46, innerHTML: "",
+                   setAttribute() {}, classList: { add() {}, remove() {} } };
     const hint = { textContent: "" };
+    const days = meta.days;
     const ctx = { meta, day_keys: DATA.day_keys, summary: summaryAt(floor),
       aggSel: { value: level }, periods: [], TREND_METRIC: metric, STRIP_ROWS: null,
+      SEL: { a: days.indexOf(S[0]), b: days.indexOf(S[S.length - 1]) },
+      SNAP: level === "day" ? "day" : level,
+      grain: () => level,
       css: () => "#000", esc: s => String(s),
       document: { getElementById: id => (id === "strip" ? host : id === "stripHint" ? hint : null) } };
     const body = grabFn(src, "periodsFor") + "\n" + grabFn(src, "trendRows") + "\n" +
-      grabFn(src, "stripRows") + "\n" + grabFn(src, "renderStrip") +
+      grabFn(src, "stripRows") + "\n" + grabFn(src, "selLabel") + "\n" + grabFn(src, "renderStrip") +
       `\nperiods = periodsFor(aggSel.value);\nrenderStrip(${JSON.stringify(S)});` +
       `\nreturn {html: host.innerHTML, hint: hint.textContent};`;
     return new Function(...Object.keys(ctx), "host", "hint", body)(...Object.values(ctx), host, hint);
@@ -132,6 +137,94 @@ function strip(src, DATA) {
   return out;
 }
 
+// The equivalence that let the period slider be retired rather than kept alongside.
+//
+// The old control could only name one whole bucket: pick a grain, pick an index, get
+// `meta.days.filter(d => day_keys[d][grain] === key)`. The brush must reproduce that day set
+// EXACTLY for every grain and every period -- otherwise "Snap = Week behaves as it always
+// did" is a claim rather than a fact, and a scoping regression would show up as slightly
+// wrong numbers everywhere at once rather than as an error.
+function equivalence(src, DATA) {
+  if (!DATA) return [[true, "equivalence skipped (no payload)"]];
+  const meta = DATA.meta, day_keys = DATA.day_keys, days = meta.days;
+  const ctx = { meta, day_keys, SNAP: "day", SEL: { a: 0, b: 0 }, periods: [] };
+  const body = grabFn(src, "periodsFor") + "\n" + grabFn(src, "periodBounds") + "\n" +
+    grabFn(src, "snapRange") + "\n" + grabFn(src, "setSel") + "\n" +
+    grabFn(src, "scopedDays") + "\n" + grabFn(src, "daysOfPeriod") + "\n" +
+    `
+    const nDays = () => meta.days.length;
+    const grain = () => SNAP === "free" ? "day" : SNAP;
+    const results = [];
+    for (const level of ["day","week","month","year"]) {
+      SNAP = level;
+      periods = periodsFor(level);
+      for (const key of periods) {
+        const want = meta.days.filter(d => day_keys[d][level] === key);
+        // land the brush anywhere inside the period, as a drag would
+        const mid = meta.days.indexOf(want[Math.floor(want.length/2)]);
+        SEL = {a:0, b:0};
+        setSel(mid, mid);
+        const got = scopedDays();
+        results.push([level, key, want.join("|") === got.join("|"), want.length, got.length]);
+      }
+    }
+    return results;
+    `;
+  const rows = new Function(...Object.keys(ctx), body)(...Object.values(ctx));
+  const bad = rows.filter(r => !r[2]);
+  const out = [[bad.length === 0,
+    `brush reproduces the old period slider exactly: ${rows.length} (grain × period) ` +
+    `combinations, ${bad.length} mismatches`]];
+  bad.slice(0, 3).forEach(r => out.push([false, `   ${r[0]} ${r[1]}: wanted ${r[3]} mornings, got ${r[4]}`]));
+  return out;
+}
+
+// And the capabilities the old control could NOT express, plus the states a brush gets
+// wrong when it is built carelessly: empty selections, wrapping, dragging off the end.
+function brush(src, DATA) {
+  if (!DATA) return [[true, "brush checks skipped (no payload)"]];
+  const meta = DATA.meta, day_keys = DATA.day_keys, days = meta.days;
+  // A station on its first morning is a real, valid page -- ranges and stepping simply have
+  // nowhere to go. Skipping is correct here; failing would make a fresh install look broken.
+  if (days.length < 8) return [[true, `brush range checks skipped (${days.length} mornings on record)`]];
+  const api = snap => {
+    const ctx = { meta, day_keys, SNAP: snap, SEL: { a: 0, b: 0 }, periods: [] };
+    const body = grabFn(src, "periodsFor") + "\n" + grabFn(src, "periodBounds") + "\n" +
+      grabFn(src, "snapRange") + "\n" + grabFn(src, "setSel") + "\n" +
+      grabFn(src, "scopedDays") + "\n" + grabFn(src, "daysOfPeriod") + "\n" +
+      grabFn(src, "stepSelection") + "\n" +
+      `const nDays = () => meta.days.length;
+       const grain = () => SNAP === "free" ? "day" : SNAP;
+       periods = periodsFor(grain());
+       return { sel: () => ({...SEL}), set: (a,b,o) => setSel(a,b,o),
+                days: () => scopedDays(), step: d => stepSelection(d) };`;
+    return new Function(...Object.keys(ctx), body)(...Object.values(ctx));
+  };
+  const out = [];
+  let b = api("free");
+  b.set(2, 4, { snap: false });
+  out.push([b.days().join() === days.slice(2, 5).join(),
+    "Free snap selects an arbitrary range — what the bucket picker could not express"]);
+  b.step(1);
+  out.push([b.sel().a === 5 && b.sel().b === 7, "stepping a free range moves it by its own width"]);
+  b.set(-9, 999, { snap: false });
+  out.push([b.sel().a === 0 && b.sel().b === days.length - 1,
+    "dragging past either end clamps to the record rather than scrolling into empty time"]);
+  b.set(6, 2, { snap: false });
+  out.push([b.sel().a === 2 && b.sel().b === 6,
+    "a right-to-left drag is normalised, never left empty"]);
+  b.set(4, 4, { snap: false });
+  out.push([b.days().length === 1, "one morning is the minimum: an empty selection is unrepresentable"]);
+  b = api("week");
+  b.set(0, 0);
+  const w1 = b.days();
+  b.step(1);
+  const w2 = b.days();
+  out.push([w1.join() !== w2.join() && w2.every(d => day_keys[d].week === day_keys[w2[0]].week),
+    "with Week snap the steppers land on exactly one week, as the old ‹ › did"]);
+  return out;
+}
+
 const argv = process.argv.slice(2);
 const pi = argv.indexOf("--payload");
 const external = pi >= 0 ? argv[pi + 1] : null;
@@ -144,7 +237,8 @@ for (const page of pages) {
   let DATA = null;
   try { DATA = JSON.parse(external ? fs.readFileSync(external, "utf8") : m[1]); } catch (e) {}
   console.log(page);
-  for (const [ok, what] of [...ladder(src), ...audioStates(src), ...strip(src, DATA)]) {
+  for (const [ok, what] of [...ladder(src), ...audioStates(src), ...strip(src, DATA),
+                            ...equivalence(src, DATA), ...brush(src, DATA)]) {
     console.log(`  ${ok ? "ok  " : "FAIL"} ${what}`);
     if (!ok) failures++;
   }
