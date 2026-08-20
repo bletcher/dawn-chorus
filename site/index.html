@@ -341,7 +341,8 @@
   .setlbl{display:flex; align-items:center; gap:6px}
   .urlinput{font:inherit; font-size:12px; padding:4px 7px; border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--ink); width:118px}
   table{border-collapse:collapse; width:100%; font-size:13px; font-variant-numeric:tabular-nums}
-  thead th{text-align:right; color:var(--muted); font-weight:600; padding:7px 10px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--surface)}
+  thead th{text-align:right; color:var(--muted); font-weight:600; padding:7px 10px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--surface);
+    white-space:normal; max-width:16ch; line-height:1.3}
   thead th:first-child, tbody td:first-child{text-align:left}
   /* Headers are right-aligned; the cells must be too, or every number reads under
      the neighbouring heading. Species stays left (see the :first-child rule). */
@@ -484,9 +485,9 @@
         <div class="plot" id="chart-ecdf"></div>
       </section>
       <section class="card" data-card="heat">
-        <h2 class="display">Regularity through the morning</h2>
+        <h2 class="display">Proportion of morning times with calls</h2>
         <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
-        <div class="about" hidden><p>Species &times; solar-minute. Colour is the share of the selection's mornings on which a species was detected in each 5-minute bin &mdash; how <em>reliably</em> it is there at that time, which is a different measure from the continuity in the table (that one is within a single morning). Only species heard in the selection get a row. This is presence, not phenology, so it lists a few species that <em>Who sings when</em> leaves out &mdash; ones heard too sparsely on any single morning to earn an onset.</p></div>
+        <div class="about" hidden><p>Species &times; solar-minute. Colour is the proportion of mornings with detections &mdash; of the mornings in the selection, how many held a detection for that species in that 5-minute window. Not the same measure as the table's <em>proportion of 5-min windows with detections</em>, which counts windows within a single morning. Only species heard in the selection get a row. This is presence, not phenology, so it lists a few species that <em>Who sings when</em> leaves out &mdash; ones heard too sparsely on any single morning to earn an onset.</p></div>
         <div class="plot" id="chart-heat"></div>
       </section>
       </div>
@@ -494,7 +495,7 @@
         <h2 class="display">Per-species table</h2>
         <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
         <p class="chfind" id="find-species"></p>
-        <div class="about" hidden><p>Aggregated over the selection: mornings present, total detections, and median onset/offset/span/peak/continuity. Hover a column heading for its definition; click a species to hear it.</p></div>
+        <div class="about" hidden><p>Aggregated over the selection: mornings present, total detections, median onset, offset, span and peak, and the proportion of 5-min windows with detections. Hover a column heading for its definition; click a species to hear it.</p></div>
         <div class="tableScroll"><table id="tbl"></table></div>
       <p class="tblnote" id="tblNote"></p>
       </section>
@@ -700,7 +701,7 @@
       <li><b>Cumulative call distributions</b> — the curve <em>F(t)</em> is the share of a species'
         detections by each minute; it crosses 0.05 at onset, 0.5 at median song-time, 0.95 at offset.
         Toggle species with the chips.</li>
-      <li><b>Regularity</b> — species &times; 5-minute bin; colour is the share of the period's mornings
+      <li><b>Proportion of morning times with calls</b> — species &times; 5-minute bin; colour is the proportion of the period's mornings
         that species was detected in that bin.</li>
       <li><b>Per-species table</b> — the same measures, aggregated over the period.</li>
     </ul>
@@ -1775,7 +1776,7 @@ function renderTimeline(S){
     // Picture mode drops the occupancy ramp: a second scale to learn before you can read
     // the first thing on the page is the opposite of what a hero is for.
     color: pic ? undefined
-      : {type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")], legend:true, label:"median continuity"},
+      : {type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")], legend:true, label:"median proportion of 5-min windows with detections"},
     marks:[
       Plot.ruleX([xv(0)], {stroke:css("--dawn"), strokeWidth:1.5, strokeDasharray:"4,3"}),
       Plot.barX(rows, pic
@@ -1837,7 +1838,7 @@ function renderHeat(S){
   if(!names.length){ el.innerHTML='<p class="empty">No species detected in this selection.</p>'; return; }
   el.append(Plot.plot({ width:W(el), height:names.length*20+80, marginLeft:ML(el,true), marginRight:26, style:plotStyle(),
     x:xAxis({grid:false}), y:{domain:names, label:null, tickFormat:n=>spName(n,el)},
-    color:{type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")], legend:true, label:"share of mornings present"},
+    color:{type:"linear", domain:[0,1], range:[css("--seq-lo"),css("--seq-hi")], legend:true, label:"proportion of mornings with detections"},
     marks:[
       Plot.rect(rows, {x1:d=>xv(d.t-HALF), x2:d=>xv(d.t+HALF), y:"name", fill:"occ", inset:0.5,
         title:d=>`${d.name}\n${xTitle(d.t)} · ${Math.round(d.occ*100)}% of mornings`}),
@@ -1996,7 +1997,7 @@ const COLDESC = {
   "offset":   "Median end of song: the 95th percentile of detection times, same units. Same {FLOOR}-detection floor as onset.",
   "span":     "offset minus onset. How long the species was detectably vocalising, not the length of one song bout.",
   "peak":     "Midpoint of the busiest 5-minute bin: when the species was most vocal. Unlike onset this needs no floor, so it is filled in even for sparse species.",
-  "continuity": "0 to 1: of the 5-minute bins between this species' first and last song, the fraction that held at least one detection. 1 means it sang right through; 0.3 means long gaps."
+  "proportion of 5-min windows with detections": "0 to 1, over the 5-minute windows between this species' first and last song of the morning. 1 means every window held a detection -- it sang right through; 0.3 means long gaps. Median across the selection's mornings."
 };
 // The floor is a slider now, so any help text quoting it has to be built at render time.
 // It said "at least 5" for as long as 5 was the only possible answer, and went stale the
@@ -2018,7 +2019,7 @@ function renderTable(S){
   const weak = d => d.n<TABLE_MIN_DET && d.onset==null;
   const thin=all.filter(weak);
   const rows=tableShowAll ? all : all.filter(d=>!weak(d));
-  const head=["Species","mornings","n","onset","offset","span","peak","continuity"];
+  const head=["Species","mornings","n","onset","offset","span","peak","proportion of 5-min windows with detections"];
   const clickable = hasAudio() && S.length===1;
   const cell = d => clickable ? `<span class="listen" data-sp="${d.name}">${d.name}</span>` : d.name;
   const body=rows.map(d=>`<tr><td>${cell(d)}</td><td>${d.mornings}</td><td>${d.n}</td>`+

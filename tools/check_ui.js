@@ -135,8 +135,9 @@ function ladder(src) {
     [!/[Oo]ccupancy/.test(src.replace(/<script[\s\S]*?<\/script>/g, "")
                              .replace(/<style[\s\S]*?<\/style>/g, "")),
       "no user-facing text still says occupancy"],
-    [/median continuity/.test(src) && /share of mornings present/.test(src),
-      "the two measures have distinct names: continuity, and share of mornings"],
+    [/proportion of 5-min windows with detections/.test(src) &&
+     /proportion of mornings with detections/.test(src) && !/continuity/.test(src),
+      "each measure is labelled by what it counts, not by a coined word"],
     // A chart floored wider than its own container overflows a phone; the page must never
     // scroll sideways.
     [/function W\(el\)\{ return Math\.max\(2\d\d,/.test(src),
