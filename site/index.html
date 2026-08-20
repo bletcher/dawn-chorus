@@ -177,11 +177,34 @@
   .card h2{font-size:19px; margin:0 0 3px; letter-spacing:-.01em}
   .card .lead{color:var(--ink2); font-size:13.5px; margin:0 0 14px; max-width:64ch}
   .controls{display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; margin-bottom:12px}
-  .chips{display:flex; flex-wrap:wrap; gap:7px}
-  .chip{font-size:12.5px; border:1px solid var(--line); border-radius:999px; padding:4px 10px; cursor:pointer; color:var(--ink2); user-select:none; background:var(--surface)}
-  .chip input{position:absolute; opacity:0; width:0; height:0}
-  .chip.on{background:var(--accent); border-color:var(--accent); color:#fff}
-  .chip:focus-within{outline:2px solid var(--accent); outline-offset:2px}
+  /* Multi-select: a row of chips for 60+ species pushed the chart itself below the fold,
+     so the list collapses into one control that opens over the page instead of displacing it. */
+  .msel{position:relative}
+  .mselbtn{font:inherit; font-size:12.5px; display:inline-flex; align-items:center; gap:8px;
+    padding:6px 11px; border:1px solid var(--line); border-radius:8px; background:var(--surface);
+    color:var(--ink); cursor:pointer}
+  .mselbtn:hover{border-color:var(--accent)}
+  .mselbtn .caret{color:var(--muted); font-size:10px}
+  .mselbtn .n{font-variant-numeric:tabular-nums; color:var(--muted)}
+  .mselpop{position:absolute; z-index:40; top:calc(100% + 6px); left:0; width:min(320px, 88vw);
+    background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    box-shadow:0 12px 34px rgba(9,13,20,.28); padding:9px; display:flex; flex-direction:column; gap:8px}
+  .mselpop[hidden]{display:none}
+  .mselpop .top{display:flex; gap:6px; align-items:center}
+  .mselpop input[type=search]{flex:1; font:inherit; font-size:12.5px; padding:5px 8px; min-width:0;
+    border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink)}
+  .mselpop .mini{font:inherit; font-size:12px; padding:5px 8px; border:1px solid var(--line);
+    border-radius:6px; background:var(--surface); color:var(--ink2); cursor:pointer; white-space:nowrap}
+  .mselpop .mini:hover{border-color:var(--accent); color:var(--ink)}
+  .msellist{max-height:260px; overflow:auto; display:flex; flex-direction:column}
+  .msellist label{display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink);
+    padding:5px 6px; border-radius:6px; cursor:pointer}
+  .msellist label:hover{background:var(--scope)}
+  .msellist label.hid{display:none}
+  .msellist .sw{width:10px; height:10px; border-radius:2px; flex:none; background:var(--muted)}
+  .msellist .cnt{margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums; font-size:11.5px}
+  .mselnone{font-size:12px; color:var(--muted); padding:6px}
+  .msel:focus-within .mselbtn{outline:2px solid var(--accent); outline-offset:2px}
   .plot{overflow-x:auto}
   .empty{color:var(--muted); font-size:14px; padding:22px 4px}
   #spec{width:100%; height:200px; display:block; border-radius:6px; background:#08061a}
@@ -408,7 +431,7 @@
         <p class="lead">The empirical CDF <em>F(t)</em> &mdash; share of a species' detections that have
           occurred by each minute &mdash; averaged across the period's mornings (each morning a replicate).
           Onset reads where a curve crosses 0.05, median song-time at 0.5, offset at 0.95.</p>
-        <div class="controls"><div class="chips" id="ecdfChips"></div></div>
+        <div class="controls"><div class="msel" id="ecdfSel"></div></div>
         <div class="plot" id="chart-ecdf"></div>
       </section>
       <section class="card" data-card="heat">
@@ -435,7 +458,7 @@
           turns?</em> Trend lines appear for species with &ge;4 mornings. Unlike the charts above this
           one ignores the time scope and always shows <em>every</em> morning, because a season is
           what it is measuring.</p>
-        <div class="controls"><div class="chips" id="seasonChips"></div></div>
+        <div class="controls"><div class="msel" id="seasonSel"></div></div>
         <div class="plot" id="chart-season"></div>
       </section>
     </div>
@@ -1555,16 +1578,59 @@ function renderFoot(){ document.getElementById("foot").innerHTML =
   `<a href="https://observablehq.com/plot/" target="_blank" rel="noopener">Observable&nbsp;Plot</a> (library, vendored). `+
   `Regenerate with <code>tools/build_site.py</code> as new mornings arrive.`; }
 
-function chipRow(elId, cls, onChange){
-  const chips=document.getElementById(elId);
+// Species picker. The checkboxes keep the same class the charts already query, and they
+// stay in the DOM when the panel is closed -- the popover is presentation, not state, so
+// nothing downstream has to know the list collapsed.
+function multiSelect(mountId, cls, onChange, label){
+  const root=document.getElementById(mountId); if(!root) return;
   const order=meta.top_species.filter(s=>meta.species.includes(s));
-  const on=new Set(order.slice(0,5));
-  chips.innerHTML=order.map(s=>`<label class="chip${on.has(s)?" on":""}"><input class="${cls}" type="checkbox" value="${s}"${on.has(s)?" checked":""}>${s}</label>`).join("");
-  chips.addEventListener("change", e=>{ e.target.closest(".chip").classList.toggle("on", e.target.checked); onChange(); });
+  const on=new Set(order.slice(0,5));                       // same default as the old chips
+  const tally={};
+  summary.forEach(r=>{ tally[r.name]=(tally[r.name]||0)+r.n; });
+  root.innerHTML =
+    `<button type="button" class="mselbtn" aria-haspopup="true" aria-expanded="false">`+
+      `${label} <span class="n"></span> <span class="caret">▼</span></button>`+
+    `<div class="mselpop" hidden>`+
+      `<div class="top"><input type="search" placeholder="Filter species…" aria-label="Filter species">`+
+        `<button type="button" class="mini" data-act="all">All</button>`+
+        `<button type="button" class="mini" data-act="none">None</button></div>`+
+      `<div class="msellist">`+ order.map(s=>
+        `<label><input class="${cls}" type="checkbox" value="${esc(s)}"${on.has(s)?" checked":""}>`+
+        `<i class="sw" data-sp="${esc(s)}"></i>${esc(s)}`+
+        `<span class="cnt">${(tally[s]||0).toLocaleString()}</span></label>`).join("")+
+      `</div><p class="mselnone" hidden>Nothing matches that filter.</p></div>`;
+
+  const btn=root.querySelector(".mselbtn"), pop=root.querySelector(".mselpop"),
+        n=root.querySelector(".n"), search=root.querySelector("input[type=search]"),
+        empty=root.querySelector(".mselnone");
+  const boxes = () => [...root.querySelectorAll("."+cls)];
+  function count(){ const c=boxes().filter(b=>b.checked).length;
+    n.textContent = c===order.length ? `all ${c}` : `${c} of ${order.length}`; }
+  function paint(){ root.querySelectorAll(".sw").forEach(sw=>{
+    sw.style.background = colorFor[sw.dataset.sp] || css("--muted"); }); }
+  function open(v){ pop.hidden=!v; btn.setAttribute("aria-expanded", String(v));
+    if(v){ paint(); search.focus(); } }
+
+  btn.onclick = e => { e.stopPropagation(); open(pop.hidden); };
+  pop.addEventListener("click", e=>e.stopPropagation());
+  root.addEventListener("change", ()=>{ count(); onChange(); paint(); });
+  pop.querySelectorAll(".mini").forEach(b=> b.onclick=()=>{
+    const want=b.dataset.act==="all";
+    // Only what the filter is showing, so "All" after a search means "all of these".
+    boxes().forEach(x=>{ if(!x.closest("label").classList.contains("hid")) x.checked=want; });
+    count(); onChange(); });
+  search.addEventListener("input", ()=>{
+    const q=search.value.trim().toLowerCase(); let shown=0;
+    boxes().forEach(x=>{ const hit=!q || x.value.toLowerCase().includes(q);
+      x.closest("label").classList.toggle("hid", !hit); if(hit) shown++; });
+    empty.hidden = shown>0; });
+  document.addEventListener("click", ()=>{ if(!pop.hidden) open(false); });
+  root.addEventListener("keydown", e=>{ if(e.key==="Escape"){ open(false); btn.focus(); } });
+  count();
 }
 function buildChips(){
-  chipRow("ecdfChips", "ecdf-sp", ()=>renderEcdf(scopedDays()));
-  chipRow("seasonChips", "season-sp", renderSeason);
+  multiSelect("ecdfSel", "ecdf-sp", ()=>renderEcdf(scopedDays()), "Species");
+  multiSelect("seasonSel", "season-sp", renderSeason, "Species");
 }
 
 // Each chapter states what the data actually says, computed from the scoped period --
