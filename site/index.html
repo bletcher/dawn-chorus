@@ -179,7 +179,6 @@
   .rgate button:hover{background:var(--accent); color:#fff}
   /* The chapter's question and its computed finding travel with the card now that the
      chapter is no longer a layout unit. */
-  .cardq{font-size:13.5px; color:var(--ink2); margin:0 0 6px; line-height:1.5; font-style:italic}
   .chfind{font-size:13px; color:var(--muted); margin:0 0 12px; line-height:1.55;
     border-left:2px solid var(--line); padding-left:10px}
   .chfind:empty{display:none}
@@ -224,7 +223,20 @@
   /* A coarse pointer needs a bigger grip than a mouse does. */
   @media (pointer:coarse){ .strip{height:56px} .strip .grip{opacity:1} }
   @media (max-width:720px){ .striprow .metseg{order:3} .strip{min-width:140px} }
-  section.card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px 18px 8px; margin-bottom:20px; box-shadow:var(--shadow)}
+  section.card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px 18px 8px; margin-bottom:20px; box-shadow:var(--shadow); position:relative}
+  /* How to read the chart, on request. It used to sit above every chart whether you needed
+     it or not -- 470 words of method the regular reader had already learned. The one line
+     that stays visible is the computed finding, because that one changes with the data. */
+  .infobtn{position:absolute; top:15px; right:15px; width:22px; height:22px; padding:0;
+    border:1px solid var(--line); border-radius:50%; background:var(--surface); color:var(--muted);
+    font:600 12px/1 var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace); cursor:pointer}
+  .infobtn:hover, .infobtn[aria-expanded="true"]{border-color:var(--accent); color:var(--accent)}
+  .about{position:absolute; top:44px; right:14px; z-index:30;
+    width:min(52ch, calc(100% - 28px));
+    background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    box-shadow:0 12px 34px rgba(9,13,20,.28); padding:13px 15px}
+  .about p{margin:0; font-size:13px; line-height:1.6; color:var(--ink2)}
+  .about[hidden]{display:none}
   .card h2{font-size:19px; margin:0 0 3px; letter-spacing:-.01em}
   .card .lead{color:var(--ink2); font-size:13.5px; margin:0 0 14px; max-width:64ch}
   .controls{display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; margin-bottom:12px}
@@ -362,7 +374,7 @@
       <button type="button" class="pstep" id="perNext" aria-label="later" title="later">&rsaquo;</button>
       <span class="periodlabel" id="periodLabel"></span>
       <button type="button" class="theme wholebtn" id="wholeRecord">Whole&nbsp;record</button>
-      <span class="scopehint">drag on the record above &mdash; scopes every chart below</span>
+      <span class="scopehint">scopes every chart below</span>
     </div>
     <div class="scoperow">
       <span class="eyebrow">Detection&nbsp;floor</span>
@@ -373,7 +385,7 @@
       </label>
       <span class="periodlabel"><output id="minDetOut">5</output></span>
       <span class="mdcount" id="minDetCount"></span>
-      <span class="scopehint">a morning needs this many to get an onset</span>
+      <span class="scopehint">needed for an onset</span>
     </div>
   </div>
 
@@ -387,69 +399,55 @@
     <div class="rbody">
       <section class="card" data-card="timeline">
         <h2 class="display">Who sings when</h2>
-        <p class="cardq">Who starts singing, and how long do they keep going?</p>
+        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
         <p class="chfind" id="find-morning"></p>
-        <p class="lead">Each bar spans a species' vocal activity &mdash; onset (5th percentile of detection
-          times) to offset (95th) &mdash; in minutes from <span class="tag">civil dawn</span> (dashed line),
-          taken as the <em>median across the scoped period's mornings</em>. Darker bars are sung more
-          continuously; the tick marks the median busiest minute.</p>
+        <div class="about" hidden><p>Each bar spans a species' vocal activity &mdash; onset (5th percentile of detection times) to offset (95th) &mdash; in minutes from <span class="tag">civil dawn</span> (dashed line), median across the selection's mornings. Darker bars are sung more continuously; the tick marks the median busiest minute. Click a bar to hear that species.</p></div>
         <div class="plot" id="chart-timeline"></div>
       </section>
       <section class="card" data-card="period">
         <h2 class="display">Calls by species</h2>
-        <p class="cardq">Who is heard most here, and how much of it is a handful of species?</p>
+        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
         <p class="chfind" id="find-period"></p>
-        <p class="lead">Species in the <span class="tag">scoped period</span> ranked by number of
-          detections, showing the same set as <em>Who sings when</em> below so the two charts agree on
-          which birds are present. The axis is linear, so bar length is directly comparable &mdash; which
-          is why the tail looks thin: a few species really do account for most of what the recorder
-          hears. Counts are detections above the confidence floor, not individual birds, so a species
-          that repeats itself outranks one that calls once from three directions.</p>
+        <div class="about" hidden><p>Species in the selection ranked by detections &mdash; the same set as <em>Who sings when</em>. The axis is linear, so bar length is directly comparable, which is why the tail looks thin. Counts are detections, not birds: a species that repeats itself outranks one that calls once from three directions.</p></div>
         <div class="plot" id="chart-period"></div>
         <p class="tblnote" id="pdNote"></p>
       </section>
       <div class="pair">
       <section class="card" data-card="ecdf">
         <h2 class="display">Cumulative call distributions</h2>
-        <p class="cardq">How does the chorus build and fade across the window?</p>
+        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
         <p class="chfind" id="find-shape"></p>
-        <p class="lead">The empirical CDF <em>F(t)</em> &mdash; share of a species' detections that have
-          occurred by each minute &mdash; averaged across the period's mornings (each morning a replicate).
-          Onset reads where a curve crosses 0.05, median song-time at 0.5, offset at 0.95.</p>
+        <div class="about" hidden><p>The empirical CDF <em>F(t)</em> &mdash; share of a species' detections that have occurred by each minute &mdash; averaged across the selection's mornings, each morning a replicate. Onset reads where a curve crosses 0.05, median song-time at 0.5, offset at 0.95.</p></div>
         <div class="controls"><div class="msel" id="ecdfSel"></div></div>
         <div class="plot" id="chart-ecdf"></div>
       </section>
       <section class="card" data-card="heat">
         <h2 class="display">Occupancy across the morning</h2>
-        <p class="lead">Species &times; solar-minute. Colour is the fraction of the scoped period's mornings
-          a species was detected in each 5-minute bin &mdash; drag the selection to watch the chorus shift.</p>
+        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
+        <div class="about" hidden><p>Species &times; solar-minute. Colour is the fraction of the selection's mornings a species was detected in each 5-minute bin. Drag the selection to watch the chorus shift.</p></div>
         <div class="plot" id="chart-heat"></div>
       </section>
       </div>
       <div class="pair">
       <section class="card" data-card="temp">
         <h2 class="display">Onset vs.&nbsp;temperature</h2>
-        <p class="cardq">Do they start earlier when it is warm, later when it rains?</p>
+        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
         <p class="chfind" id="find-weather"></p>
-        <p class="lead">Each dot is a species on one morning: its onset (minutes from <span class="tag">civil
-          dawn</span>) against the temperature at dawn &mdash; the founding question, <em>does the chorus start
-          earlier on warm mornings?</em> A downward trend says yes. Per-species trend lines appear once a
-          species has &ge;4 mornings in the period; treat pooled patterns cautiously (weather confounds season).</p>
+        <div class="about" hidden><p>Each dot is a species on one morning: its onset against the temperature at dawn. Per-species trend lines appear once a species has &ge;4 mornings in the selection. Treat pooled patterns cautiously &mdash; warm mornings also arrive later in the season.</p></div>
         <div class="plot" id="chart-temp"></div>
       </section>
       <section class="card" data-card="rain">
         <h2 class="display">Onset vs.&nbsp;rain</h2>
-        <p class="lead">Onset against total rainfall over the morning window (mm). Points sit at 0 on dry
-          mornings; a rightward shift on wet mornings would show birds starting later in the rain.</p>
+        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
+        <div class="about" hidden><p>Onset against total rainfall over the morning window (mm). Points sit at 0 on dry mornings; a rightward shift on wet mornings would show birds starting later in the rain.</p></div>
         <div class="plot" id="chart-rain"></div>
       </section>
       </div>
       <section class="card" data-card="table">
         <h2 class="display">Per-species table</h2>
-        <p class="cardq">What did each one actually do?</p>
+        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
         <p class="chfind" id="find-species"></p>
-        <p class="lead">Aggregated over the scoped period: mornings present, total detections, and median
-          onset/offset/span/peak/occupancy (minutes from civil dawn).</p>
+        <div class="about" hidden><p>Aggregated over the selection: mornings present, total detections, and median onset/offset/span/peak/occupancy in minutes from civil dawn. Hover a column heading for its definition; click a species to hear it.</p></div>
         <div class="tableScroll"><table id="tbl"></table></div>
       <p class="tblnote" id="tblNote"></p>
       </section>
@@ -464,16 +462,9 @@
     <div class="rbody">
       <section class="card" data-card="trend">
         <h2 class="display">Rolled up <span class="muted" id="trendGrainLabel"></span></h2>
-        <p class="cardq">How much is being heard, and how does that change as the season turns?</p>
+        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
         <p class="chfind" id="find-overview"></p>
-        <p class="lead">The record <em>rolled up</em> &mdash; the one thing the strip at the top cannot
-          show you, since it always draws one bar per morning and never re-buckets. Weeks and months
-          smooth out the morning-to-morning noise that dominates a short record: a single quiet morning
-          is weather, a quiet month is the season turning. Like the strip, this ignores the selection;
-          highlighted bars are the periods the selection touches, and clicking one scopes to it.
-          Counts follow the <span class="tag">detection floor</span> &mdash; a species is counted in a
-          period once it clears the floor on one of that period's mornings, the same test every chart
-          below uses.</p>
+        <div class="about" hidden><p>The record rolled up by week, month or year &mdash; smoothing the morning-to-morning noise the strip at the top shows in full. Ignores the selection; highlighted bars are the periods it touches, and clicking one scopes to it. Counts follow the <span class="tag">detection floor</span>.</p></div>
         <div class="controls">
           <label class="ctl">Roll&nbsp;up&nbsp;by
             <select id="trendGrain">
@@ -488,13 +479,9 @@
       </section>
       <section class="card" data-card="season">
         <h2 class="display">Onset through the season</h2>
-        <p class="cardq">Does a species shift earlier or later as the year turns?</p>
+        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
         <p class="chfind" id="find-season"></p>
-        <p class="lead">Each dot is one species on one morning: when it started, against the date.
-          This is the seasonal question &mdash; <em>does a species shift earlier or later as the year
-          turns?</em> Trend lines appear for species with &ge;4 mornings. Unlike the charts above this
-          one ignores the selection and always shows <em>every</em> morning, because a season is
-          what it is measuring.</p>
+        <div class="about" hidden><p>Each dot is one species on one morning: when it started, against the date. Trend lines appear for species with &ge;4 mornings. Ignores the selection &mdash; a season is what it measures.</p></div>
         <div class="controls"><div class="msel" id="seasonSel"></div></div>
         <div class="plot" id="chart-season"></div>
       </section>
@@ -1098,7 +1085,7 @@ function updateAudioCard(S){
   }
   const lead=document.getElementById("audioLead");
   if(lead && one) lead.innerHTML =
-    `Click a chart (snaps to the nearest call) or a table species to see its <strong>spectrogram</strong> on <strong>${S[0]}</strong>; use <strong>‹ ›</strong> to step through calls, ▶ to play.`;
+    `Click any chart or a species name to hear it. <strong>‹ ›</strong> steps through calls, ▶ plays.`;
 }
 
 // Narrowing for the reader rather than telling them to go and do it: switch to Daily and
@@ -2171,6 +2158,32 @@ function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S)
   renderWeather(S,"r","chart-rain","rain over the window (mm)","rain");
   renderTable(S); updateAudioCard(S); renderFindings(S);
   renderStrip(S); renderRungs(S); renderCrumb(S); syncBarHeight(); }
+
+// ---- "how to read this" popovers ---------------------------------------------------------
+// The button sits OUTSIDE the h2 on purpose: the h2 is the collapse toggle, and a control
+// nested inside another control's hit area is a trap however carefully you stop propagation.
+function closeAbouts(except){
+  document.querySelectorAll(".card .about").forEach(a=>{
+    if(a===except) return;
+    a.hidden=true;
+    const b=a.closest(".card").querySelector(".infobtn");
+    if(b) b.setAttribute("aria-expanded","false");
+  });
+}
+document.addEventListener("click", e=>{
+  const btn=e.target.closest(".infobtn");
+  if(btn){
+    const card=btn.closest(".card"), about=card && card.querySelector(".about");
+    if(!about) return;
+    const show=about.hidden;
+    closeAbouts(show ? about : null);
+    about.hidden=!show;
+    btn.setAttribute("aria-expanded", String(show));
+    return;
+  }
+  if(!e.target.closest(".about")) closeAbouts(null);
+});
+addEventListener("keydown", e=>{ if(e.key==="Escape") closeAbouts(null); });
 
 // ---- card collapsing + settings ---------------------------------------------------------
 // Cards render into a hidden element as 0-wide, so anything opened has to be redrawn.

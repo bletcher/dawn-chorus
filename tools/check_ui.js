@@ -91,6 +91,16 @@ function ladder(src) {
       "the roll-up cannot be set to Morning, so it can never duplicate the strip"],
     [/let TREND_GRAIN/.test(src) && /renderTrend[\s\S]{0,400}?TREND_GRAIN/.test(src),
       "the roll-up reads its own grain, not the selection's"],
+    // Method text sits behind a button; the one line that stays on screen is the computed
+    // finding, because that one changes with the data. A card that puts its prose back on
+    // the page would undo the point of the button.
+    // Count card OPENINGS, not every `data-card=` in the file -- the JS selectors match too.
+    [(src.match(/class="infobtn"/g) || []).length ===
+     (src.match(/<section class="card" data-card="/g) || []).length,
+      "every chart card has an info button"],
+    [!/<p class="lead">/.test(src.slice(src.indexOf('class="ladder"'), src.indexOf("<footer"))),
+      "no card puts its method text back on the page"],
+    [!src.includes('class="cardq"'), "the chapter questions, which restated the titles, are gone"],
   ];
 }
 
