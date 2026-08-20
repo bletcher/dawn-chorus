@@ -74,7 +74,12 @@ function ladder(src) {
   return [
     // Selection leads because the context strip is pinned above everything and is itself the
     // overview -- so the ladder below can open on what you are actually looking at.
-    [rungs.join(",") === "selection,season,morning", `rungs are selection → season → morning (got ${rungs})`],
+    [rungs.join(",") === "selection,season,morning,clip",
+      `rungs are selection → season → morning → clip (got ${rungs})`],
+    // The clip rung must not be a permanently empty bottom step: it appears when a clip is
+    // loaded and not before, which is what showSpec toggles.
+    [/function showSpec[\s\S]{0,220}?rungEl\("clip"\)/.test(src),
+      "the clip rung appears only when there is a clip"],
     [/data-rung="selection"[\s\S]*?data-card="timeline"[\s\S]*?data-card="period"/.test(src),
       "Who sings when leads the selection rung"],
     [rungs.every(r => scopes.includes(r)), "every rung has a scope sentence element"],
@@ -90,7 +95,7 @@ function ladder(src) {
     [/renderWeather\(meta\.days,"t"/.test(src) && /renderWeather\(meta\.days,"r"/.test(src),
       "and are given every morning on record, not the selection"],
     [!src.includes('class="chapter"'), "the old chapter layout is gone"],
-    [src.includes('id="crumb"'), "the breadcrumb is present"],
+    [!src.includes('id="crumb"'), "the breadcrumb row is gone; the rung headers carry the scope"],
     // The roll-up chart used to follow the Snap control, which meant that at Snap = Morning
     // it drew the context strip's series a second time one screen below it. Its grain is now
     // its own and starts at Week, so the two can never show the same thing.
@@ -108,6 +113,18 @@ function ladder(src) {
     [!/<p class="lead">/.test(src.slice(src.indexOf('class="ladder"'), src.indexOf("<footer"))),
       "no card puts its method text back on the page"],
     [!src.includes('class="cardq"'), "the chapter questions, which restated the titles, are gone"],
+    // A view is a link: the four things that decide what the page shows go in the query
+    // string, and the URL beats stored preferences on load or a shared link shows the
+    // recipient their own habits instead of the sender's view.
+    [/function writeURL/.test(src) && /q\.set\("from"/.test(src) && /q\.set\("floor"/.test(src) &&
+     /q\.set\("metric"/.test(src) && /q\.set\("snap"/.test(src),
+      "the selection, floor, metric and snap are written to the URL"],
+    [/URLQ\.get\("floor"\)\s*\|\|\s*localStorage/.test(src) &&
+     /URLQ\.get\("metric"\)\s*\|\|\s*localStorage/.test(src) &&
+     /URLQ\.get\("snap"\)\s*\|\|\s*localStorage/.test(src),
+      "and the URL wins over localStorage on load"],
+    [/history\.replaceState/.test(src) && !/history\.pushState/.test(src),
+      "written with replaceState, so a brush drag does not fill the back button"],
     // The heatmap's y domain was every species on record, so a quiet morning drew dozens of
     // blank rows. It must be built from what the selection actually contains.
     [/function renderHeat[\s\S]*?all\.filter\(n=>seen\.has\(n\)\)/.test(src),

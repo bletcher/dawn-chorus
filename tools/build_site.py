@@ -494,6 +494,17 @@ TEMPLATE = r"""<!doctype html>
   .scoperow{display:flex; align-items:center; gap:16px 20px; flex-wrap:wrap}
   .scopebar .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.09em;
     color:var(--muted); font-weight:600; min-width:78px}
+  /* Three rows that all read as "label, then controls" are three rows you have to parse
+     before you can use any of them. They are not peers: Record is what exists, Selection is
+     a readout of what you picked out of it, and the floor is a different axis entirely --
+     nothing to do with time. So Selection nests under Record, and the floor is fenced off. */
+  .striprow .eyebrow{color:var(--dawn)}
+  .selrow{margin-left:3px; padding-left:15px; border-left:2px solid var(--grid)}
+  .selrow .eyebrow{min-width:60px}
+  .floorrow{margin-top:3px; padding-top:11px; border-top:1px solid var(--grid)}
+  /* The selection label is the answer to "what am I looking at", so it is the loudest
+     text in the bar rather than one more control caption. */
+  #periodLabel{font-size:16.5px; letter-spacing:-.01em}
   .periodlabel{font-size:14px; color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap}
   .scopehint{margin-left:auto; font-size:12px; color:var(--muted)}
   /* The live cost of the current floor, beside the number that sets it -- the whole reason
@@ -579,15 +590,7 @@ TEMPLATE = r"""<!doctype html>
     .rname{font-size:18px}
     .rhead{position:static; background:none}
   }
-  /* ── Breadcrumb ───────────────────────────────────────────────────────────────── */
-  .crumbrow{padding-bottom:2px}
-  .crumb{display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:13px; min-width:0}
-  .crumb button{font:inherit; font-size:13px; background:none; border:0; padding:2px 0; cursor:pointer;
     color:var(--ink2); border-bottom:1px solid transparent}
-  .crumb button:hover{color:var(--ink); border-bottom-color:var(--accent)}
-  .crumb button[aria-current="true"]{color:var(--ink); font-weight:600}
-  .crumb button:disabled{color:var(--muted); cursor:default; opacity:.6}
-  .crumb .sep{color:var(--line)}
   /* ── Context strip ────────────────────────────────────────────────────────────────
      Every morning on record, always on screen, never scoped and never aggregated -- a
      context view that changed with the selection would not be context. Hand-rolled SVG
@@ -734,10 +737,6 @@ TEMPLATE = r"""<!doctype html>
   </header>
 
   <div class="scopebar">
-    <div class="scoperow crumbrow">
-      <span class="eyebrow">You&nbsp;are&nbsp;here</span>
-      <nav class="crumb" id="crumb" aria-label="Where you are"></nav>
-    </div>
     <div class="scoperow striprow">
       <span class="eyebrow">Record</span>
       <div class="strip" id="strip" role="group" aria-label="Every morning on record; click one to scope to it"></div>
@@ -747,7 +746,7 @@ TEMPLATE = r"""<!doctype html>
       </span>
       <span class="scopehint" id="stripHint"></span>
     </div>
-    <div class="scoperow">
+    <div class="scoperow selrow">
       <span class="eyebrow">Selection</span>
       <label class="ctl">Snap&nbsp;to
         <select id="snapSel" title="Where the selection's edges land when you drag">
@@ -764,7 +763,7 @@ TEMPLATE = r"""<!doctype html>
       <button type="button" class="theme wholebtn" id="wholeRecord">Whole&nbsp;record</button>
       <span class="scopehint">scopes every chart below</span>
     </div>
-    <div class="scoperow">
+    <div class="scoperow floorrow">
       <span class="eyebrow">Detection&nbsp;floor</span>
       <label class="ctl fixed">Min&nbsp;per&nbsp;morning
         <button type="button" class="pstep" id="mdPrev" aria-label="lower the floor" title="lower the floor">&lsaquo;</button>
@@ -878,7 +877,7 @@ TEMPLATE = r"""<!doctype html>
 
   <section class="rung" data-rung="morning" hidden>
     <header class="rhead">
-      <h2 class="rname">Morning &amp; clip</h2>
+      <h2 class="rname">Morning</h2>
       <p class="rscope" id="scope-morning"></p>
     </header>
     <div class="rbody">
@@ -886,6 +885,28 @@ TEMPLATE = r"""<!doctype html>
       <section class="card audio" id="audioCard">
     <h2 class="display">Listen</h2>
     <p class="lead" id="audioLead"></p>
+    <div class="audioinfo" id="audioInfo"></div>
+    <div class="audioset">
+      <input type="file" id="dirPick" webkitdirectory directory multiple hidden>
+      <button class="setbtn" id="dirBtn">📁 Recordings folder…</button>
+      <span class="setnote" id="dirStatus"></span>
+      <span class="setsep">·</span>
+      <label class="setlbl">served base <input type="text" id="urlBase" class="urlinput" spellcheck="false"></label>
+      <span class="setsep">·</span>
+      <label class="setlbl">colours
+        <select id="specMode"><option value="color">Colour</option><option value="bw">B&amp;W</option></select>
+      </label>
+    </div>
+  </section>
+
+  <section class="rung" data-rung="clip" hidden>
+    <header class="rhead">
+      <h2 class="rname">Clip</h2>
+      <p class="rscope" id="scope-clip"></p>
+    </header>
+    <div class="rbody">
+      <section class="card" id="clipCard">
+        <h2 class="display">Spectrogram</h2>
     <div id="specWrap" hidden>
       <div class="specrow">
         <div class="freqax" id="freqax"><span></span><span></span><span></span></div>
@@ -904,19 +925,10 @@ TEMPLATE = r"""<!doctype html>
       </div>
       <div class="clipsp" id="clipSpecies"></div>
     </div>
-    <div class="audioinfo" id="audioInfo"></div>
-    <div class="audioset">
-      <input type="file" id="dirPick" webkitdirectory directory multiple hidden>
-      <button class="setbtn" id="dirBtn">📁 Recordings folder…</button>
-      <span class="setnote" id="dirStatus"></span>
-      <span class="setsep">·</span>
-      <label class="setlbl">served base <input type="text" id="urlBase" class="urlinput" spellcheck="false"></label>
-      <span class="setsep">·</span>
-      <label class="setlbl">colours
-        <select id="specMode"><option value="color">Colour</option><option value="bw">B&amp;W</option></select>
-      </label>
+      </section>
     </div>
   </section>
+
     </div>
   </section>
 
@@ -1043,23 +1055,36 @@ TEMPLATE = r"""<!doctype html>
   <div class="dialog" role="dialog" aria-modal="true" aria-label="Add data">
     <button class="close" id="addClose" aria-label="Close">&times;</button>
     <h2 class="display">Add data</h2>
-    <p>This site is <b>static</b> — the charts are precomputed files, so there's no upload in the
-      browser. You add data with a short step on the machine that has the recordings; they never leave
-      it (only detection times are published). About a minute, start to finish.</p>
+    <p>This site is <b>static</b> &mdash; the charts are precomputed files, so there is no upload in
+      the browser. You add data on the machine that holds the recordings; they never leave it, and
+      only detection times are published.</p>
 
-    <h3>1 &middot; New mornings for a site you already have</h3>
-    <p>Drop the new recordings in your audio folder, then detect on just the new files:</p>
-    <pre>python tools/track.py process --audio data --lat 42.537278 --lon -72.531694 --tz America/New_York</pre>
-    <p>Regenerate this site's data and publish it (commits &amp; pushes &rarr; live in ~1&nbsp;min):</p>
-    <pre>python tools/publish.py --slug montague --name "North St, Montague, MA" --from-analyzer data/results --lat 42.537278 --lon -72.531694 --tz America/New_York --push</pre>
+    <h3>The control panel</h3>
+    <p>Easiest path. It lists every recording, shows which have been analysed, takes new files and
+      runs the models with a progress bar:</p>
+    <pre>python tools/run.py webapp</pre>
+    <p class="muted">Then open <span class="tag">http://localhost:8765</span>. On Windows,
+      <span class="tag">.\run.ps1 webapp</span> does the same without naming the virtualenv.</p>
 
-    <h3>2 &middot; A whole new site</h3>
-    <p>Same commands with a new <span class="tag">--slug</span>, <span class="tag">--name</span>, and
-      your station's coordinates — it's added to the picker automatically.</p>
-    <p class="muted">Contributing to someone else's instance? Run <span class="tag">build_payloads.py</span>
-      for your site and open a pull request with the new <span class="tag">site/data/&lt;slug&gt;.json</span>
-      (and the updated <span class="tag">sites.json</span>) — or send that one file to the maintainer.
-      Full details are in the project README.</p>
+    <h3>Or from the command line</h3>
+    <p>Drop new recordings into the deployment's audio folder, then:</p>
+    <pre>python tools/run.py all</pre>
+    <p>That detects on just the new files and rebuilds the dashboards. To put it on the public site:</p>
+    <pre>python tools/run.py publish --push</pre>
+    <p>Both read <span class="tag">deployments.json</span> for each site's coordinates, timezone and
+      recorder, so those are declared once rather than retyped. That matters more than the keystrokes:
+      a wrong <span class="tag">--recorder</span> silently mis-parses filenames and drops whole
+      recordings, and a wrong timezone shifts every solar time &mdash; neither raises an error.</p>
+
+    <h3>A new site or a new recorder</h3>
+    <p>Add it to <span class="tag">deployments.json</span> &mdash; a slug, coordinates, timezone, and a
+      recorder id from <span class="tag">dawnchorus/recorders.py</span>. Then
+      <span class="tag">run.py all</span> as above; it is added to the picker automatically.</p>
+    <p class="muted">Contributing to someone else's instance? Run <span class="tag">run.py publish</span>
+      without <span class="tag">--push</span> and open a pull request with the new
+      <span class="tag">site/data/&lt;slug&gt;.json</span> (and the updated
+      <span class="tag">sites.json</span>) &mdash; or send that one file to the maintainer. Full
+      details are in the project README.</p>
   </div>
 </div>
 
@@ -1073,6 +1098,23 @@ const root = document.documentElement;
 const css = v => getComputedStyle(root).getPropertyValue(v).trim();
 const fmt = (x, d=0) => (x==null || Number.isNaN(x)) ? "—" : Number(x).toFixed(d);
 const seriesColors = () => ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"].map(css);
+
+/* A view is a link. The selection, the floor, the metric and the snap are the four things
+   that decide what the page shows, so they go in the query string and a pasted URL
+   reproduces exactly what the sender was looking at. The URL wins over stored preferences
+   on load -- a shared link that showed the recipient THEIR habits would not be a link to
+   anything. Everything else stays in localStorage, where a preference belongs. */
+const URLQ = new URLSearchParams(location.search);
+function writeURL(){
+  const q=new URLSearchParams(location.search);
+  const d=meta.days;
+  if(d.length){ q.set("from", d[SEL.a]); q.set("to", d[SEL.b]); }
+  q.set("floor", String(MIN_DET));
+  q.set("metric", TREND_METRIC);
+  q.set("snap", SNAP);
+  // replaceState: dragging a brush must not fill the back button with every frame.
+  history.replaceState(null, "", location.pathname+"?"+q.toString()+location.hash);
+}
 
 const GRID = meta.grid, NB = GRID.length, HALF = meta.bin/2;
 const DAYIDX = {}; meta.days.forEach((d,i)=> DAYIDX[d]=i);
@@ -1090,7 +1132,7 @@ const SPIDX = {}; meta.species.forEach((s,i)=> SPIDX[s]=i);
 // to the build-time summary when a payload predates this.
 const PHEN = DATA.phen || null, PHSP = meta.phen_species || [];
 const QO = meta.onset_quantile!=null ? meta.onset_quantile : 0.05;
-let MIN_DET = (()=>{ const v=parseInt(localStorage.getItem("dc_min_det"),10);
+let MIN_DET = (()=>{ const v=parseInt(URLQ.get("floor")||localStorage.getItem("dc_min_det"),10);
   return Number.isFinite(v) && v>=1 && v<=30 ? v : (meta.min_detections || 5); })();
 
 // numpy's 'linear' interpolation, so the browser and Python place a quantile identically.
@@ -1153,8 +1195,12 @@ let actx=null, srcNode=null, playRAF=null, cur=null;
 function secToClock(sec){ sec=Math.max(0,Math.round(sec)); const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s=sec%60;
   return [h,m,s].map(v=>String(v).padStart(2,"0")).join(":"); }
 function setAudioInfo(html){ const e=document.getElementById("audioInfo"); if(e) e.innerHTML=html; }
+// The clip is its own rung now: it appears when there is a clip and not before, so the
+// ladder has no permanently-empty bottom step.
 function showSpec(on){ const w=document.getElementById("specWrap"); if(w) w.hidden=!on;
-  if(!on) listClipSpecies([]); }
+  const r=rungEl("clip"); if(r) r.hidden=!on;
+  if(!on){ listClipSpecies([]); const sc=document.getElementById("scope-clip");
+           if(sc) sc.textContent=""; } }
 
 function audioUrl(name){ return ABASE.replace(/\/+$/,"") + "/" + encodeURIComponent(name); }
 async function getBytes(name, s, e){                       // e inclusive; local picked File, else served fetch
@@ -1359,8 +1405,12 @@ async function loadAt(day, list, pos){                        // load + draw lis
     document.getElementById("prevDet").disabled=pos<=0;
     document.getElementById("nextDet").disabled=pos>=list.length-1;
     // "Centred on", not just the name: the clip routinely holds other singers, and the
-    // bare name read as a claim that this was the only bird in it.
-    setAudioInfo(`Centred on <strong>${name}</strong> ${c.toFixed(2)} · ${secToClock(abs)} local · ${Math.round(t)} min from dawn · <span class="mono">${f.name}</span>`);
+    // bare name read as a claim that this was the only bird in it. It states the clip, so
+    // it belongs in the clip rung's header rather than back up in the morning card.
+    const sc=document.getElementById("scope-clip");
+    if(sc) sc.innerHTML = `Centred on <strong>${esc(name)}</strong> ${c.toFixed(2)} · `+
+      `${secToClock(abs)} local · ${Math.round(t)} min from dawn · <span class="mono">${esc(f.name)}</span>`;
+    setAudioInfo("");
   }catch(err){ showSpec(false); setAudioInfo(audioErr(err)); } }
 
 function audioErr(e){ return `Couldn't load audio (${e.message}). Pick your recordings folder below, or run <code>python tools/serve.py</code> and open <code>/site/</code>.`; }
@@ -1457,7 +1507,7 @@ function W(el){ return Math.max(300, el.clientWidth || 900); }
    Snap = Week reproduces the old weekly slider exactly, which is the equivalence the
    check_ui harness asserts rather than assumes. */
 const SNAP_KEY="dc_snap";
-let SNAP=(()=>{ const v=localStorage.getItem(SNAP_KEY);
+let SNAP=(()=>{ const v=(URLQ.get("snap")||localStorage.getItem(SNAP_KEY));
   return ["day","week","month","year","free"].includes(v) ? v : "day"; })();
 let SEL={a:0, b:0};
 const nDays = () => meta.days.length;
@@ -1503,8 +1553,12 @@ function selLabel(){
 function rebuildPeriods(){
   periods = periodsFor(grain());
   if(!periods.length){ SEL={a:0,b:0}; renderAll(); syncSteppers(); return; }
-  const last=daysOfPeriod(periods[periods.length-1]);
-  SEL={a:meta.days.indexOf(last[0]), b:meta.days.indexOf(last[last.length-1])};
+  // A shared link names its own mornings; otherwise land on the most recent period, which
+  // is what the old slider did on load.
+  const a=meta.days.indexOf(URLQ.get("from")||""), b=meta.days.indexOf(URLQ.get("to")||"");
+  if(a>=0 && b>=0){ SEL={a:Math.min(a,b), b:Math.max(a,b)}; }
+  else { const last=daysOfPeriod(periods[periods.length-1]);
+         SEL={a:meta.days.indexOf(last[0]), b:meta.days.indexOf(last[last.length-1])}; }
   renderAll(); syncSteppers();
 }
 
@@ -1518,7 +1572,8 @@ const PERIOD_WORD = {day:"morning", week:"week", month:"month", year:"year"};
 // slider, because a trend is the thing a single period cannot show. The four summary tiles
 // this replaced stated the same totals as one frozen number each, which answered "how much
 // in total" and never "is it rising or falling".
-let TREND_METRIC = localStorage.getItem("dc_trend_metric") || "calls";
+let TREND_METRIC = (()=>{ const v=URLQ.get("metric")||localStorage.getItem("dc_trend_metric");
+  return v==="species" ? "species" : "calls"; })();
 // Counts follow the detection floor, because every chart under this one does.
 //
 // The floor never removes a summary ROW -- it only nulls onset/offset -- so summing r.n
@@ -1637,7 +1692,7 @@ function renderLive(){
   if(dragRAF) return;
   dragRAF=requestAnimationFrame(()=>{ dragRAF=0;
     const S=scopedDays();
-    renderStrip(S); updateScopeLabel(S); renderCrumb(S); renderRungs(S); syncSteppers(); });
+    renderStrip(S); updateScopeLabel(S); renderRungs(S); syncSteppers(); });
 }
 function renderCheapSoon(){
   clearTimeout(cheapTimer);
@@ -2381,27 +2436,6 @@ function renderRungs(S){
     : `<em>Needs the scope narrowed to one morning</em> — audio is per recording.`);
 }
 
-// Where you are, as a path you can click back up. Reads state; owns none of it.
-function renderCrumb(S){
-  const el=document.getElementById("crumb"); if(!el) return;
-  const one=S.length===1 ? S[0] : null;
-  const steps=[
-    {k:"season", t:"Season", on:true},
-    {k:"selection", t:selLabel(), on:true},
-    {k:"morning", t: one || `${S.length} mornings`, on: !!one && hasAudio()},
-  ];
-  if(cur && cur.clip) steps.push({k:"morning", t:`${LABELSP[cur.anchorSi]||"clip"}`, on:true, last:true});
-  el.innerHTML = steps.map((s,i)=>
-    (i?`<span class="sep">›</span>`:``)+
-    `<button type="button" data-goto="${s.k}"${s.on?"":" disabled"}`+
-    `${i===steps.length-1?' aria-current="true"':''}>${esc(s.t)}</button>`).join("");
-  el.querySelectorAll("button[data-goto]").forEach(b=> b.onclick=()=>{
-    const r=rungEl(b.dataset.goto); if(!r) return;
-    setRung(b.dataset.goto, false, true); renderAll();
-    r.scrollIntoView({behavior:"smooth", block:"start"});
-  });
-}
-
 // Each chapter states what the data actually says, computed from the scoped period --
 // a narrative that ignored the numbers would be decoration. Empty text hides itself, so
 // a chapter with nothing to report says nothing rather than padding.
@@ -2504,7 +2538,7 @@ function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S)
   renderWeather(meta.days,"t","chart-temp","temperature at dawn (°C)","temp");
   renderWeather(meta.days,"r","chart-rain","rain over the window (mm)","rain");
   renderTable(S); updateAudioCard(S); renderFindings(S);
-  renderStrip(S); renderRungs(S); renderCrumb(S); syncBarHeight(); }
+  renderStrip(S); renderRungs(S); syncBarHeight(); writeURL(); }
 
 // ---- "how to read this" popovers ---------------------------------------------------------
 // The button sits OUTSIDE the h2 on purpose: the h2 is the collapse toggle, and a control
