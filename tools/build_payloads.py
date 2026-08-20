@@ -49,6 +49,8 @@ def main(argv=None):
                    help="confidence floor for the charts")
     p.add_argument("--label-min-confidence", dest="label_min_conf", type=float, default=0.25,
                    help="lower floor for spectrogram labels")
+    p.add_argument("--weather-cache", dest="weather_cache", default=None,
+                   help="shared with build_site so one fetch serves both builds")
     p.add_argument("--out-dir", default="site/data", help="where to write the JSON (default site/data)")
     args = p.parse_args(argv)
 
@@ -66,7 +68,8 @@ def main(argv=None):
         print(f"[exclude] {n['date']}: dropped {n['removed']:,} detections of "
               f"{', '.join(n['species'])}")
     payload = build_payload(det, args.lat, args.lon, args.tz,
-                            args.min_confidence, args.label_min_conf)
+                            args.min_confidence, args.label_min_conf,
+                            weather_cache=args.weather_cache)
     payload["meta"]["exclusions"] = excl_notes
 
     out = Path(args.out_dir)

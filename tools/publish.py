@@ -42,6 +42,7 @@ def main(argv=None):
     p.add_argument("--unit", default=None, help="serial of the physical box, e.g. 2MM43813")
     p.add_argument("--file-tz", dest="file_tz", default=None)
     p.add_argument("--min-confidence", type=float, default=dc.CHART_MIN_CONFIDENCE)
+    p.add_argument("--weather-cache", dest="weather_cache", default=None)
     p.add_argument("--label-min-confidence", dest="label_min_conf", type=float, default=0.25)
     p.add_argument("--push", action="store_true",
                    help="git push after committing (triggers the deploy); otherwise just commit")
@@ -58,6 +59,8 @@ def main(argv=None):
         bp += ["--recorder", args.recorder]
     if args.unit:
         bp += ["--unit", args.unit]
+    if args.weather_cache:
+        bp += ["--weather-cache", args.weather_cache]
     build_payloads.main(bp)
 
     # 2) commit only the site data (nothing else)

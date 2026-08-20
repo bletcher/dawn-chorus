@@ -82,6 +82,13 @@ function ladder(src) {
     [/data-card="season"/.test(seasonBody),
       "the seasonal chart sits on the rung that ignores the scope"],
     [/data-card="trend"/.test(seasonBody), "the record-wide trend sits on the season rung"],
+    // Onset against weather pools across mornings; scoped to one it has a single reading and
+    // nothing to regress. It belongs on the rung that ignores the selection, and must be fed
+    // the whole record rather than S.
+    [/data-card="temp"/.test(seasonBody) && /data-card="rain"/.test(seasonBody),
+      "the onset-vs-weather charts sit on the season rung"],
+    [/renderWeather\(meta\.days,"t"/.test(src) && /renderWeather\(meta\.days,"r"/.test(src),
+      "and are given every morning on record, not the selection"],
     [!src.includes('class="chapter"'), "the old chapter layout is gone"],
     [src.includes('id="crumb"'), "the breadcrumb is present"],
     // The roll-up chart used to follow the Snap control, which meant that at Snap = Morning
@@ -161,6 +168,15 @@ function strip(src, DATA) {
   const hint = draw("day", [days[0]], "calls", 5).hint;
   out.push([!/\d{3,}/.test(hint.replace(/\d{4}-\d{2}-\d{2}/g, "")),
     "the strip's hint carries no grain-dependent total"]);
+
+  // The local dashboard emitted no `weather` key at all, so both onset-vs-weather charts
+  // were permanently empty on the only build where they can be clicked through to audio.
+  const wx = DATA.weather;
+  const withT = wx ? Object.values(wx).filter(v => v && v.t != null).length : 0;
+  out.push([!!wx, "the payload carries a weather key"]);
+  out.push([withT > 0 || !wx,
+    `weather present for ${withT} of ${days.length} mornings ` +
+    `(0 means the charts will say so rather than draw nothing)`]);
   return out;
 }
 

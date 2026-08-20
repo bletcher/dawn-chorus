@@ -428,21 +428,6 @@
         <div class="plot" id="chart-heat"></div>
       </section>
       </div>
-      <div class="pair">
-      <section class="card" data-card="temp">
-        <h2 class="display">Onset vs.&nbsp;temperature</h2>
-        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
-        <p class="chfind" id="find-weather"></p>
-        <div class="about" hidden><p>Each dot is a species on one morning: its onset against the temperature at dawn. Per-species trend lines appear once a species has &ge;4 mornings in the selection. Treat pooled patterns cautiously &mdash; warm mornings also arrive later in the season.</p></div>
-        <div class="plot" id="chart-temp"></div>
-      </section>
-      <section class="card" data-card="rain">
-        <h2 class="display">Onset vs.&nbsp;rain</h2>
-        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
-        <div class="about" hidden><p>Onset against total rainfall over the morning window (mm). Points sit at 0 on dry mornings; a rightward shift on wet mornings would show birds starting later in the rain.</p></div>
-        <div class="plot" id="chart-rain"></div>
-      </section>
-      </div>
       <section class="card" data-card="table">
         <h2 class="display">Per-species table</h2>
         <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
@@ -485,6 +470,21 @@
         <div class="controls"><div class="msel" id="seasonSel"></div></div>
         <div class="plot" id="chart-season"></div>
       </section>
+      <div class="pair">
+      <section class="card" data-card="temp">
+        <h2 class="display">Onset vs.&nbsp;temperature</h2>
+        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
+        <p class="chfind" id="find-weather"></p>
+        <div class="about" hidden><p>Each dot is a species on one morning: its onset against the temperature at dawn. Per-species trend lines appear once a species has &ge;4 mornings. Uses every morning on record, not the selection &mdash; one morning is one weather reading. Treat pooled patterns cautiously &mdash; warm mornings also arrive later in the season.</p></div>
+        <div class="plot" id="chart-temp"></div>
+      </section>
+      <section class="card" data-card="rain">
+        <h2 class="display">Onset vs.&nbsp;rain</h2>
+        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
+        <div class="about" hidden><p>Onset against total rainfall over the morning window (mm). Points sit at 0 on dry mornings; a rightward shift on wet mornings would show birds starting later in the rain.</p></div>
+        <div class="plot" id="chart-rain"></div>
+      </section>
+      </div>
     </div>
   </section>
 
@@ -2128,7 +2128,7 @@ function renderFindings(S){
       `A species needs 4 mornings before a trend line is drawn.`
     : "One morning so far — a trend needs several.");
 
-  const wx=DATA.weather||{}, wd=Object.keys(wx).filter(d=>wx[d] && wx[d].t!=null);
+  const wx=DATA.weather||{}, wd=meta.days.filter(d=>wx[d] && wx[d].t!=null);
   put("weather", wd.length
     ? `Weather for ${wd.length} morning${wd.length===1?"":"s"}. Treat pooled patterns carefully: `+
       `warm mornings also arrive later in the season.`
@@ -2162,8 +2162,10 @@ function syncTrendMetric(){
 function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S);
   setXOffset(S);
   renderTrend(); renderPeriod(S); renderTimeline(S); renderEcdf(S); renderHeat(S); renderSeason();
-  renderWeather(S,"t","chart-temp","temperature at dawn (°C)","temp");
-  renderWeather(S,"r","chart-rain","rain over the window (mm)","rain");
+  // The season rung ignores the selection, and these two live there now: pooling onset
+  // against weather needs many mornings, and one morning has a single reading.
+  renderWeather(meta.days,"t","chart-temp","temperature at dawn (°C)","temp");
+  renderWeather(meta.days,"r","chart-rain","rain over the window (mm)","rain");
   renderTable(S); updateAudioCard(S); renderFindings(S);
   renderStrip(S); renderRungs(S); renderCrumb(S); syncBarHeight(); }
 

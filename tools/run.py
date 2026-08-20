@@ -89,6 +89,9 @@ def cmd_dashboard(args):
         print(f"\n=== dashboard {d.label} -> {out.name} ===")
         build_site.main(["--from-analyzer", str(d.results), "--audio", str(d.audio),
                          "--site", d.site,
+                         # Beside the recordings, like results/ and manifest.json: a
+                         # deployment carries everything it needs and moves as one unit.
+                         "--weather-cache", str(d.audio / "weather.csv"),
                          "--recorder", d.recorder, "--audio-url-base", f"../{d.audio.name}",
                          "--lat", str(d.lat), "--lon", str(d.lon), "--tz", d.tz,
                          "--min-confidence", str(args.min_confidence), "--out", str(out)])
@@ -119,7 +122,8 @@ def cmd_publish(args):
     print(f"publishing {d.label} as site '{d.site}'")
     argv = ["--slug", d.site, "--name", d.name, "--from-analyzer", str(d.results),
             "--lat", str(d.lat), "--lon", str(d.lon), "--tz", d.tz,
-            "--recorder", d.recorder, "--min-confidence", str(args.min_confidence)]
+            "--recorder", d.recorder, "--min-confidence", str(args.min_confidence),
+            "--weather-cache", str(d.audio / "weather.csv")]
     if d.unit:
         argv += ["--unit", d.unit]
     if args.push:

@@ -88,7 +88,8 @@ def scan_audio(audio_dir, lat, lon, tz, recorder=None):
 
 def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
                min_conf=dc.CHART_MIN_CONFIDENCE, file_tz=None, audio_dir=None, audio_base="../data", label_min_conf=0.25,
-               label_analyzer_path=None, recorder=None, site=None):
+               label_analyzer_path=None, recorder=None, site=None,
+               weather=True, weather_cache=None, weather_source="archive"):
     out = dc.run(db_path=db_path, analyzer_path=analyzer_path, latitude=lat, longitude=lon,
                  tz=tz, min_confidence=min_conf, file_tz=file_tz, recorder=recorder)
     det, ms = out["detections"], out["morning_summary"]
@@ -196,6 +197,33 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
         phen.setdefault(str(d), {})[psp[sp]] = [round(float(v), 3)
                                                 for v in sorted(g[acol].tolist())]
 
+    # Per-morning weather (Open-Meteo): temperature at dawn, rain over the window.
+    #
+    # The local dashboard never carried this at all -- only the published payload did -- so
+    # the two "Onset vs ..." charts have been permanently empty on every locally built page,
+    # which is the only place they can be clicked through to audio. Cached to disk beside the
+    # recordings so a rebuild needs no network, and failing soft: no connection means empty
+    # charts that say so, never a broken build.
+    solar = dc.SolarModel(lat, lon, tz)
+    wx_by_day = {}
+    if weather:
+        try:
+            from dawnchorus import weather as _wx
+            mdays = sorted(pd.unique(ms["date"]))
+            hourly = _wx.fetch_hourly(lat, lon, min(mdays), max(mdays), tz,
+                                      cache_path=weather_cache, source=weather_source)
+            mw = _wx.morning_weather(hourly, solar, mdays)
+            for r in mw.itertuples():
+                t, rain = getattr(r, "temp_at_anchor", np.nan), getattr(r, "precip_sum", np.nan)
+                wx_by_day[str(r.date)] = {"t": None if pd.isna(t) else round(float(t), 1),
+                                          "r": None if pd.isna(rain) else round(float(rain), 2)}
+            print(f"weather: {sum(1 for v in wx_by_day.values() if v['t'] is not None)} "
+                  f"of {len(mdays)} mornings"
+                  + (f" (cache {weather_cache})" if weather_cache else " (no cache)"))
+        except Exception as e:
+            print(f"weather unavailable ({type(e).__name__}: {e}); the onset-vs-weather "
+                  f"charts will say so")
+
     valid = ms.dropna(subset=["onset_min"])
     earliest = None
     if not valid.empty:
@@ -226,7 +254,6 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
     # Civil dawn per morning, independent of whether recordings are present: the viewer
     # needs it to offer a clock-time axis, and dawn drifts through the season so a fixed
     # offset would misplace every point.
-    solar = dc.SolarModel(lat, lon, tz)
     for d in meta["mornings"]:
         if d in dawn:
             continue
@@ -236,7 +263,7 @@ def build_data(analyzer_path=None, db_path=None, lat=None, lon=None, tz=None,
             dawn[d] = dw.hour * 3600 + dw.minute * 60 + dw.second
     return {"meta": meta, "summary": summary, "counts": counts, "day_keys": day_keys,
             "audio": audio, "dawn": dawn, "clips": clips, "dets": dets_by_day,
-            "phen": phen}
+            "phen": phen, "weather": wx_by_day}
 
 
 def render_html(data: dict) -> str:
@@ -321,6 +348,11 @@ def main(argv=None):
     p.add_argument("--lat", type=float, required=True)
     p.add_argument("--lon", type=float, required=True)
     p.add_argument("--tz", required=True)
+    p.add_argument("--weather-cache", dest="weather_cache", default=None,
+                   help="CSV of hourly weather; written on first fetch, read after, so a "
+                        "rebuild needs no network")
+    p.add_argument("--no-weather", dest="weather", action="store_false",
+                   help="skip the Open-Meteo fetch entirely")
     p.add_argument("--site", default=None,
                    help="site slug in deployments.json; enables its curated exclusions")
     p.add_argument("--recorder", default=None,
@@ -344,7 +376,8 @@ def main(argv=None):
                       lon=args.lon, tz=args.tz, min_conf=args.min_confidence, file_tz=args.file_tz,
                       audio_dir=args.audio, audio_base=args.audio_base, label_min_conf=args.label_min_conf,
                       label_analyzer_path=args.label_from_analyzer, recorder=args.recorder,
-                      site=args.site)
+                      site=args.site, weather=args.weather,
+                      weather_cache=args.weather_cache)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(data), encoding="utf-8")
@@ -783,21 +816,6 @@ TEMPLATE = r"""<!doctype html>
         <div class="plot" id="chart-heat"></div>
       </section>
       </div>
-      <div class="pair">
-      <section class="card" data-card="temp">
-        <h2 class="display">Onset vs.&nbsp;temperature</h2>
-        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
-        <p class="chfind" id="find-weather"></p>
-        <div class="about" hidden><p>Each dot is a species on one morning: its onset against the temperature at dawn. Per-species trend lines appear once a species has &ge;4 mornings in the selection. Treat pooled patterns cautiously &mdash; warm mornings also arrive later in the season.</p></div>
-        <div class="plot" id="chart-temp"></div>
-      </section>
-      <section class="card" data-card="rain">
-        <h2 class="display">Onset vs.&nbsp;rain</h2>
-        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
-        <div class="about" hidden><p>Onset against total rainfall over the morning window (mm). Points sit at 0 on dry mornings; a rightward shift on wet mornings would show birds starting later in the rain.</p></div>
-        <div class="plot" id="chart-rain"></div>
-      </section>
-      </div>
       <section class="card" data-card="table">
         <h2 class="display">Per-species table</h2>
         <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
@@ -840,6 +858,21 @@ TEMPLATE = r"""<!doctype html>
         <div class="controls"><div class="msel" id="seasonSel"></div></div>
         <div class="plot" id="chart-season"></div>
       </section>
+      <div class="pair">
+      <section class="card" data-card="temp">
+        <h2 class="display">Onset vs.&nbsp;temperature</h2>
+        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
+        <p class="chfind" id="find-weather"></p>
+        <div class="about" hidden><p>Each dot is a species on one morning: its onset against the temperature at dawn. Per-species trend lines appear once a species has &ge;4 mornings. Uses every morning on record, not the selection &mdash; one morning is one weather reading. Treat pooled patterns cautiously &mdash; warm mornings also arrive later in the season.</p></div>
+        <div class="plot" id="chart-temp"></div>
+      </section>
+      <section class="card" data-card="rain">
+        <h2 class="display">Onset vs.&nbsp;rain</h2>
+        <button type="button" class="infobtn" aria-expanded="false" aria-label="How to read this chart" title="How to read this chart">i</button>
+        <div class="about" hidden><p>Onset against total rainfall over the morning window (mm). Points sit at 0 on dry mornings; a rightward shift on wet mornings would show birds starting later in the rain.</p></div>
+        <div class="plot" id="chart-rain"></div>
+      </section>
+      </div>
     </div>
   </section>
 
@@ -2432,7 +2465,7 @@ function renderFindings(S){
       `A species needs 4 mornings before a trend line is drawn.`
     : "One morning so far — a trend needs several.");
 
-  const wx=DATA.weather||{}, wd=Object.keys(wx).filter(d=>wx[d] && wx[d].t!=null);
+  const wx=DATA.weather||{}, wd=meta.days.filter(d=>wx[d] && wx[d].t!=null);
   put("weather", wd.length
     ? `Weather for ${wd.length} morning${wd.length===1?"":"s"}. Treat pooled patterns carefully: `+
       `warm mornings also arrive later in the season.`
@@ -2466,8 +2499,10 @@ function syncTrendMetric(){
 function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S);
   setXOffset(S);
   renderTrend(); renderPeriod(S); renderTimeline(S); renderEcdf(S); renderHeat(S); renderSeason();
-  renderWeather(S,"t","chart-temp","temperature at dawn (°C)","temp");
-  renderWeather(S,"r","chart-rain","rain over the window (mm)","rain");
+  // The season rung ignores the selection, and these two live there now: pooling onset
+  // against weather needs many mornings, and one morning has a single reading.
+  renderWeather(meta.days,"t","chart-temp","temperature at dawn (°C)","temp");
+  renderWeather(meta.days,"r","chart-rain","rain over the window (mm)","rain");
   renderTable(S); updateAudioCard(S); renderFindings(S);
   renderStrip(S); renderRungs(S); renderCrumb(S); syncBarHeight(); }
 
