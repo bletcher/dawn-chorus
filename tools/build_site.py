@@ -439,11 +439,17 @@ TEMPLATE = r"""<!doctype html>
   .close{position:absolute; top:10px; right:14px; background:none; border:none; color:var(--muted);
     font-size:26px; line-height:1; cursor:pointer; padding:2px 6px}
   .close:hover{color:var(--ink)}
-  .tiles{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px}
-  .tile{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:13px 15px; box-shadow:var(--shadow)}
-  .tile .k{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em}
-  .tile .v{font-size:26px; font-weight:600; margin-top:3px; font-variant-numeric:tabular-nums}
-  .tile .v small{font-size:13px; color:var(--ink2); font-weight:500}
+  /* Two mutually exclusive views of one chart, so it reads as one control with a current
+     position rather than two buttons that might both be on. */
+  .metseg{display:inline-flex; border:1px solid var(--line); border-radius:7px; overflow:hidden;
+    background:var(--surface)}
+  .metseg button{font:inherit; font-size:12.5px; padding:5px 12px; border:0; cursor:pointer;
+    background:transparent; color:var(--ink2); white-space:nowrap}
+  .metseg button + button{border-left:1px solid var(--line)}
+  .metseg button:hover:not([aria-pressed="true"]){background:var(--scope); color:var(--ink)}
+  .metseg button[aria-pressed="true"]{background:var(--accent); color:#fff; font-weight:600}
+  .mutedhint{font-size:12.5px; color:var(--muted)}
+  .card > h2 .muted{font-size:13px; font-weight:400; color:var(--muted); letter-spacing:0}
   /* Column of rows: one line per control group, each with a matching eyebrow label.
      Only controls whose effect you WATCH live here -- time scope and the detection floor.
      The time axis moved to Settings: it is a fixed preference, set once, and a permanent
@@ -590,7 +596,7 @@ TEMPLATE = r"""<!doctype html>
   footer a{color:var(--accent)}
   footer .excl{margin:0 0 14px; padding:9px 12px; border-left:3px solid var(--warn,#c9853f);
     background:rgba(201,133,63,.09); border-radius:0 6px 6px 0; color:var(--ink)}
-  @media (max-width:720px){ .tiles{grid-template-columns:repeat(2,1fr)} h1{font-size:27px} .scopehint{display:none} }
+  @media (max-width:720px){ h1{font-size:27px} .scopehint{display:none} }
 </style>
 </head>
 <body>
@@ -607,8 +613,6 @@ TEMPLATE = r"""<!doctype html>
       <button class="theme" id="theme" aria-label="Toggle light or dark theme">◐ Theme</button>
     </div>
   </header>
-
-  <div class="tiles" id="tiles"></div>
 
   <div class="scopebar">
     <div class="scoperow">
@@ -681,13 +685,39 @@ TEMPLATE = r"""<!doctype html>
 
   <section class="chapter" id="ch-overview">
     <div class="rail">
-      <span class="chwhen">the whole period</span>
+      <span class="chwhen">whole record</span>
       <h2 class="chtitle">Overview</h2>
-      <p class="chq">Who is heard most, and how much of the chorus is a handful of species?</p>
+      <p class="chq">How much is being heard, and how does that change as the season turns?</p>
       <p class="chfind" id="find-overview"></p>
     </div>
     <div class="chbody">
-      <section class="card" data-card="overview">
+      <section class="card" data-card="trend">
+        <h2 class="display">Across the record <span class="muted" id="trendGrain"></span></h2>
+        <p class="lead">Every period on record at the current aggregation, <em>not</em> just the one in
+          scope &mdash; this is the only chart on the page that ignores the period slider, because a
+          single period cannot show you a trend. The highlighted bar is the period everything below is
+          scoped to; click any bar to move there.</p>
+        <div class="controls">
+          <span class="metseg" id="trendMetric" role="group" aria-label="Metric">
+            <button type="button" data-metric="calls" aria-pressed="true">Calls</button>
+            <button type="button" data-metric="species" aria-pressed="false">Species</button>
+          </span>
+          <span class="mutedhint" id="trendHint"></span>
+        </div>
+        <div class="plot" id="chart-trend"></div>
+      </section>
+    </div>
+  </section>
+
+  <section class="chapter" id="ch-period">
+    <div class="rail">
+      <span class="chwhen">selected period</span>
+      <h2 class="chtitle">Selected period</h2>
+      <p class="chq">Who is heard most here, and how much of it is a handful of species?</p>
+      <p class="chfind" id="find-period"></p>
+    </div>
+    <div class="chbody">
+      <section class="card" data-card="period">
         <h2 class="display">Calls by species</h2>
         <p class="lead">Species in the <span class="tag">scoped period</span> ranked by number of
           detections, showing the same set as <em>Who sings when</em> below so the two charts agree on
@@ -695,8 +725,8 @@ TEMPLATE = r"""<!doctype html>
           is why the tail looks thin: a few species really do account for most of what the recorder
           hears. Counts are detections above the confidence floor, not individual birds, so a species
           that repeats itself outranks one that calls once from three directions.</p>
-        <div class="plot" id="chart-overview"></div>
-        <p class="tblnote" id="ovNote"></p>
+        <div class="plot" id="chart-period"></div>
+        <p class="tblnote" id="pdNote"></p>
       </section>
     </div>
   </section>
@@ -1314,19 +1344,85 @@ function renderSubline(){ const m=meta, loc=(m.lat!=null&&m.lon!=null)?`${m.lat.
   document.getElementById("subline").innerHTML =
     `${m.days.length} morning${m.days.length>1?"s":""} &middot; ${loc} &middot; ${m.tz||""}`; }
 
-function renderTiles(){ const m=meta;
-  // Earliest onset depends on the floor, so it is recomputed rather than read from the
-  // build-time meta -- a headline tile contradicting the charts below it would be worse
-  // than no tile.
-  let e=m.earliest;
-  if(PHEN){ e=null;
-    summary.forEach(r=>{ if(r.onset!=null && (!e || r.onset<e.onset)) e={name:r.name, onset:r.onset}; }); }
-  const tiles=[["Mornings", `${m.days[0]||"—"}${m.days.length>1?" → "+m.days[m.days.length-1]:""}`],
-    ["Species", m.n_species],
-    ["Detections", m.n_detections.toLocaleString()+` <small>&ge;${m.min_confidence} conf</small>`],
-    ["Earliest onset", e ? `${fmt(e.onset,0)}<small> min &middot; ${e.name}</small>` : "—"]];
-  document.getElementById("tiles").innerHTML = tiles.map(([k,v])=>
-    `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join(""); }
+const PERIOD_WORD = {day:"morning", week:"week", month:"month", year:"year"};
+
+// Every period on record at the current grain -- the ONE chart that ignores the period
+// slider, because a trend is the thing a single period cannot show. The four summary tiles
+// this replaced stated the same totals as one frozen number each, which answered "how much
+// in total" and never "is it rising or falling".
+let TREND_METRIC = localStorage.getItem("dc_trend_metric") || "calls";
+function trendRows(){
+  const level=aggSel.value, agg=new Map();
+  summary.forEach(r=>{ const dk=day_keys[r.date]; if(!dk) return;
+    const k=dk[level]; let e=agg.get(k);
+    if(!e) agg.set(k, e={calls:0, sp:new Set(), days:new Set()});
+    e.calls+=r.n; e.sp.add(r.name); e.days.add(r.date); });
+  // Emitted in `periods` order, not the map's: these bars ARE the slider's positions, and a
+  // bar that maps to no period could not be clicked into scope.
+  return periods.map(k=>{ const e=agg.get(k);
+    return {key:k, calls:e?e.calls:0, species:e?e.sp.size:0, mornings:e?e.days.size:0}; });
+}
+// A band scale draws every tick it is given, so thin them by hand rather than let 100
+// morning labels overprint into a grey smear.
+function thinTicks(keys, max){
+  if(keys.length<=max) return keys;
+  const step=Math.ceil(keys.length/max);
+  return keys.filter((_,i)=> i%step===0 || i===keys.length-1);
+}
+const shortKey = (k, level) =>
+  level==="day" ? k.slice(5) : level==="month" ? k : level==="week" ? k.replace("-W","w") : k;
+
+function renderTrend(){
+  const el=document.getElementById("chart-trend"); el.innerHTML="";
+  const level=aggSel.value, rows=trendRows(), metric=TREND_METRIC;
+  const cur=periods[Math.min(+slider.value, periods.length-1)] ?? periods[0];
+  const g=document.getElementById("trendGrain");
+  if(g) g.textContent = `· by ${PERIOD_WORD[level]||level}`;
+  const hint=document.getElementById("trendHint");
+  if(!rows.length){ el.innerHTML='<p class="empty">Nothing on record yet.</p>'; if(hint) hint.textContent=""; return; }
+  const total=rows.reduce((s,d)=>s+d[metric],0);
+  const best=rows.reduce((a,b)=> b[metric]>a[metric]?b:a, rows[0]);
+  if(hint) hint.innerHTML = `${rows.length} ${PERIOD_WORD[level]||level}${rows.length===1?"":"s"} on record` +
+    (metric==="calls" ? ` &middot; ${total.toLocaleString()} detections in all` : ``) +
+    ` &middot; busiest ${best.key} at ${best[metric].toLocaleString()}`;
+  const names=rows.map(d=>d.key);
+  el.append(Plot.plot({ width:W(el), height:ratioH(el,.30,190,300),
+    marginLeft:ML(el,false), marginRight:16, marginBottom:rows.length>10?54:34, style:plotStyle(),
+    x:{domain:names, label:null, tickRotate:rows.length>10?-45:0,
+       ticks:thinTicks(names, 14), tickFormat:k=>shortKey(k,level)},
+    y:{label:metric==="calls" ? "↑ detections" : "↑ species", grid:true, nice:true},
+    marks:[
+      // One fill, plus a selection highlight. The highlight is a STATE, not a second
+      // series: it says "this is what everything below is showing", which is the only
+      // reason the two chapters can be read together.
+      Plot.barY(rows, {x:"key", y:metric, rx:2, insetLeft:.5, insetRight:.5,
+        fill:d=>d.key===cur?css("--dawn"):css("--accent")}),
+      Plot.ruleY([0], {stroke:css("--line")}),
+      Plot.tip(rows, Plot.pointerX({x:"key", y:metric, title:d=>
+        `${d.key}\n${d.calls.toLocaleString()} detections · ${d.species} species\n`+
+        `${d.mornings} morning${d.mornings===1?"":"s"}`+(d.key===cur?"\n(in scope)":"\nclick to scope here")}))
+    ]}));
+  wirePeriodClicks(el, names);
+}
+// Clicking a bar moves the scope there: the overview is also the navigation, so you can
+// see a spike and go look at it without hunting for it on the slider.
+function wirePeriodClicks(el, names){
+  const p=el.firstElementChild; if(!p || !p.scale) return;
+  const xs=p.scale("x"); if(!xs || !xs.apply) return;
+  const svg=[...el.querySelectorAll(":scope > svg")].sort((a,b)=>b.clientWidth-a.clientWidth)[0];
+  if(!svg) return;
+  svg.style.cursor="pointer";
+  svg.addEventListener("click", ev=>{
+    const rect=svg.getBoundingClientRect();
+    const iw=(svg.width && svg.width.baseVal && svg.width.baseVal.value) || rect.width;
+    const px=(ev.clientX-rect.left)/rect.width*iw;
+    let hit=null, best=Infinity;
+    for(const k of names){ const c=xs.apply(k)+(xs.bandwidth||0)/2, d=Math.abs(c-px);
+      if(d<best){ best=d; hit=k; } }
+    const i=periods.indexOf(hit);
+    if(i>=0 && i!==+slider.value){ slider.value=String(i); renderAll(); syncSteppers(); }
+  });
+}
 
 function updateScopeLabel(S){ const pkey=periods[Math.min(+slider.value, periods.length-1)] ?? periods[0];
   document.getElementById("periodLabel").textContent = `${pkey||"—"} · ${S.length} morning${S.length!==1?"s":""}`; }
@@ -1418,9 +1514,9 @@ function aggBySpecies(S){ const set=new Set(S), g={};
 // median over the full record, 76% of species under 2% of the longest bar). A log axis
 // would make every bar visible, but bar length would stop being proportional to the count
 // -- and the skew is the finding, not an obstacle to it.
-let overviewShowAll = false;
-function renderOverview(S){
-  const el=document.getElementById("chart-overview"); el.innerHTML="";
+let periodShowAll = false;
+function renderPeriod(S){
+  const el=document.getElementById("chart-period"); el.innerHTML="";
   const g=aggBySpecies(S);
   // `charted` is exactly renderTimeline's admission test -- a species is in "Who sings
   // when" only if some scoped morning gave it an onset, which needs >=5 detections inside
@@ -1432,8 +1528,8 @@ function renderOverview(S){
     .filter(d=>d.n>0)
     .sort((a,b)=> b.n-a.n || a.name.localeCompare(b.name));   // ties resolve stably, not randomly
   const sparse=all.filter(d=>!d.charted);
-  const rows=overviewShowAll ? all : all.filter(d=>d.charted);
-  overviewNote(all, sparse, rows, S);
+  const rows=periodShowAll ? all : all.filter(d=>d.charted);
+  periodNote(all, sparse, rows, S);
   if(!rows.length){ el.innerHTML='<p class="empty">No species cleared the onset threshold in this period.</p>'; return; }
   const names=rows.map(d=>d.name), total=rows.reduce((s,d)=>s+d.n,0);
   // Fit the gutter to the longest name actually shown. The shared ML() is a flat 172px,
@@ -1462,20 +1558,20 @@ function renderOverview(S){
 // is severe -- on a quiet morning it can drop a third of the detections -- so the note
 // carries the actual cost and a way to undo it, rather than leaving a thin chart looking
 // like a thin morning.
-function overviewNote(all, sparse, rows, S){
-  const note=document.getElementById("ovNote"); if(!note) return;
+function periodNote(all, sparse, rows, S){
+  const note=document.getElementById("pdNote"); if(!note) return;
   if(!sparse.length){ note.textContent = `${rows.length} species — every one also appears in “Who sings when”.`; return; }
   const lost=sparse.reduce((s,d)=>s+d.n,0), tot=all.reduce((s,d)=>s+d.n,0);
-  note.innerHTML = overviewShowAll
+  note.innerHTML = periodShowAll
     ? `All ${all.length} species detected, including ${sparse.length} too sparse for an onset `+
       `(never 5 detections in one morning) and so absent from “Who sings when”. `+
-      `<button type="button" id="ovToggle">Match “Who sings when”</button>`
+      `<button type="button" id="pdToggle">Match “Who sings when”</button>`
     : `${rows.length} species — the same set as “Who sings when”. ${sparse.length} more were `+
       `detected but never reached 5 detections in a single morning, so they have no onset: `+
       `${lost.toLocaleString()} detection${lost===1?"":"s"}, ${fmt(100*lost/tot,1)}% of the period. `+
-      `<button type="button" id="ovToggle">Show all</button>`;
-  const b=document.getElementById("ovToggle");
-  if(b) b.onclick=()=>{ overviewShowAll=!overviewShowAll; renderOverview(scopedDays()); renderFindings(scopedDays()); };
+      `<button type="button" id="pdToggle">Show all</button>`;
+  const b=document.getElementById("pdToggle");
+  if(b) b.onclick=()=>{ periodShowAll=!periodShowAll; renderPeriod(scopedDays()); renderFindings(scopedDays()); };
 }
 
 function renderTimeline(S){
@@ -1786,14 +1882,34 @@ function renderFindings(S){
   // to estimate it off bar lengths.
   const cnt=Object.keys(g).map(n=>({n, det:g[n].reduce((s,r)=>s+r.n,0),
                                     charted:g[n].some(r=>r.onset!=null)}))
-                          .filter(d=>d.det>0 && (overviewShowAll || d.charted))
+                          .filter(d=>d.det>0 && (periodShowAll || d.charted))
                           .sort((a,b)=>b.det-a.det);
   if(cnt.length){
     const tot=cnt.reduce((s,d)=>s+d.det,0), top5=cnt.slice(0,5).reduce((s,d)=>s+d.det,0);
-    put("overview", `${cnt.length} species, ${tot.toLocaleString()} detections over `+
+    put("period", `${cnt.length} species, ${tot.toLocaleString()} detections over `+
       `${S.length} morning${S.length===1?"":"s"}. ${cnt[0].n} leads with `+
       `${cnt[0].det.toLocaleString()} (${fmt(100*cnt[0].det/tot,0)}%); the top `+
       `${Math.min(5,cnt.length)} account for ${fmt(100*top5/tot,0)}% of everything heard.`);
+  } else put("period","");
+
+  // The overview chapter reports the WHOLE record, so it must not be computed from S.
+  const tr=trendRows(), M=TREND_METRIC, word=PERIOD_WORD[aggSel.value]||aggSel.value;
+  if(tr.length){
+    const vals=tr.map(d=>d[M]), sum=vals.reduce((a,b)=>a+b,0);
+    const hi=tr.reduce((a,b)=>b[M]>a[M]?b:a, tr[0]), lo=tr.reduce((a,b)=>b[M]<a[M]?b:a, tr[0]);
+    const noun = M==="calls" ? "detections" : "species";
+    let arc="";
+    if(tr.length>=6){                       // thirds, not a fitted line: n is small and uneven
+      const k=Math.floor(tr.length/3), mean=a=>a.reduce((x,y)=>x+y,0)/a.length;
+      const first=mean(vals.slice(0,k)), last=mean(vals.slice(-k));
+      const pct=first ? 100*(last-first)/first : 0;
+      arc = Math.abs(pct)<12 ? ` The first and last thirds of the record are within 12% of each other.`
+        : ` The last ${k} ${word}${k===1?"":"s"} average ${fmt(Math.abs(pct),0)}% `+
+          `${pct<0?"fewer":"more"} than the first ${k}.`;
+    }
+    put("overview", `${tr.length} ${word}${tr.length===1?"":"s"} on record, `+
+      `${sum.toLocaleString()} ${noun} in all. Busiest ${hi.key} at ${hi[M].toLocaleString()}; `+
+      `quietest ${lo.key} at ${lo[M].toLocaleString()}.${arc}`);
   } else put("overview","");
 
   const rows=Object.keys(g).map(n=>{ const rs=g[n].filter(r=>r.onset!=null);
@@ -1824,9 +1940,24 @@ function renderFindings(S){
   put("species", rows.length ? `Median values across ${S.length} morning${S.length===1?"":"s"} in scope.` : "");
 }
 
+// Calls vs species: two genuinely different questions. Calls is dominated by whichever
+// species happens to be repetitive that week; species counts every bird once, so a quiet
+// morning with a wide cast reads high on one and low on the other.
+(()=>{ const seg=document.getElementById("trendMetric"); if(!seg) return;
+  seg.addEventListener("click", e=>{
+    const b=e.target.closest("button[data-metric]"); if(!b) return;
+    TREND_METRIC=b.dataset.metric; localStorage.setItem("dc_trend_metric", TREND_METRIC);
+    syncTrendMetric(); renderTrend(); renderFindings(scopedDays());
+  });
+})();
+function syncTrendMetric(){
+  document.querySelectorAll("#trendMetric button").forEach(b=>
+    b.setAttribute("aria-pressed", String(b.dataset.metric===TREND_METRIC)));
+}
+
 function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S);
   setXOffset(S);
-  renderOverview(S); renderTimeline(S); renderEcdf(S); renderHeat(S); renderSeason();
+  renderTrend(); renderPeriod(S); renderTimeline(S); renderEcdf(S); renderHeat(S); renderSeason();
   renderWeather(S,"t","chart-temp","temperature at dawn (°C)","temp");
   renderWeather(S,"r","chart-rain","rain over the window (mm)","rain");
   renderTable(S); updateAudioCard(S); renderFindings(S); }
@@ -1988,7 +2119,7 @@ document.getElementById("theme").onclick = ()=>{ const curTheme=root.getAttribut
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", ()=>{ if(!root.hasAttribute("data-theme")) renderAll(); });
 let rz; addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(()=>{ renderAll(); renderClip(); }, 180); });
 
-renderSubline(); renderTiles(); renderFoot(); buildChips(); rebuildPeriods();
+renderSubline(); renderFoot(); buildChips(); syncTrendMetric(); rebuildPeriods();
 }
 // Static build embeds JSON in #data; the viewer leaves it empty and provides __bootFetch.
 (function(){ const el=document.getElementById("data"), t=el?el.textContent.trim():"";
