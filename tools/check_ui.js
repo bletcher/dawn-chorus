@@ -129,6 +129,22 @@ function ladder(src) {
     [!/<p class="lead">/.test(src.slice(src.indexOf('class="ladder"'), src.indexOf("<footer"))),
       "no card puts its method text back on the page"],
     [!src.includes('class="cardq"'), "the chapter questions, which restated the titles, are gone"],
+    // "Occupancy" named two different measures: continuity WITHIN a morning (the table
+    // column and the hero's fill) and share of mornings ACROSS the record (the heatmap).
+    // One word for two quantities is the same trap as one control with three meanings.
+    [!/[Oo]ccupancy/.test(src.replace(/<script[\s\S]*?<\/script>/g, "")
+                             .replace(/<style[\s\S]*?<\/style>/g, "")),
+      "no user-facing text still says occupancy"],
+    [/median continuity/.test(src) && /share of mornings present/.test(src),
+      "the two measures have distinct names: continuity, and share of mornings"],
+    // A chart floored wider than its own container overflows a phone; the page must never
+    // scroll sideways.
+    [/function W\(el\)\{ return Math\.max\(2\d\d,/.test(src),
+      "charts can shrink below 300px, so a narrow phone does not scroll sideways"],
+    [/@media \(max-width:760px\)\{[\s\S]*?\.scopebar\{position:static/.test(src),
+      "the three-row scope bar stops sticking on a phone, where it would be most of the screen"],
+    [/@media \(pointer:coarse\)\{[\s\S]*?\.infobtn\{width:30px/.test(src),
+      "tap targets grow on touch devices"],
     // A view is a link: the four things that decide what the page shows go in the query
     // string, and the URL beats stored preferences on load or a shared link shows the
     // recipient their own habits instead of the sender's view.
