@@ -364,7 +364,10 @@
         <p class="lead">Every period on record at the current aggregation, <em>not</em> just the one in
           scope &mdash; this is the only chart on the page that ignores the period slider, because a
           single period cannot show you a trend. The highlighted bar is the period everything below is
-          scoped to; click any bar to move there.</p>
+          scoped to; click any bar to move there. Counts follow the
+          <span class="tag">detection floor</span>: a species is counted in a period once it clears the
+          floor on one of that period's mornings, the same test the charts below use, so the highlighted
+          bar always equals the chapter under it.</p>
         <div class="controls">
           <span class="metseg" id="trendMetric" role="group" aria-label="Metric">
             <button type="button" data-metric="calls" aria-pressed="true">Calls</button>
@@ -1070,16 +1073,29 @@ const PERIOD_WORD = {day:"morning", week:"week", month:"month", year:"year"};
 // this replaced stated the same totals as one frozen number each, which answered "how much
 // in total" and never "is it rising or falling".
 let TREND_METRIC = localStorage.getItem("dc_trend_metric") || "calls";
+// Counts follow the detection floor, because every chart under this one does.
+//
+// The floor never removes a summary ROW -- it only nulls onset/offset -- so summing r.n
+// straight off `summary` gave a total that sat still while the slider moved, and an
+// Overview reporting 71 species while the chapter below it drew 42. A species counts here
+// on the same test the rest of the page uses: it cleared the floor on at least one morning
+// in the period. What that excludes is reported rather than dropped, in `offSp`/`offCalls`.
 function trendRows(){
   const level=aggSel.value, agg=new Map();
   summary.forEach(r=>{ const dk=day_keys[r.date]; if(!dk) return;
     const k=dk[level]; let e=agg.get(k);
-    if(!e) agg.set(k, e={calls:0, sp:new Set(), days:new Set()});
-    e.calls+=r.n; e.sp.add(r.name); e.days.add(r.date); });
+    if(!e) agg.set(k, e={perSp:new Map(), days:new Set(), allCalls:0, allSp:new Set()});
+    e.days.add(r.date); e.allCalls+=r.n; e.allSp.add(r.name);
+    let s=e.perSp.get(r.name); if(!s) e.perSp.set(r.name, s={calls:0, ok:false});
+    s.calls+=r.n; if(r.onset!=null) s.ok=true; });
   // Emitted in `periods` order, not the map's: these bars ARE the slider's positions, and a
   // bar that maps to no period could not be clicked into scope.
   return periods.map(k=>{ const e=agg.get(k);
-    return {key:k, calls:e?e.calls:0, species:e?e.sp.size:0, mornings:e?e.days.size:0}; });
+    if(!e) return {key:k, calls:0, species:0, mornings:0, offSp:0, offCalls:0};
+    let calls=0, species=0;
+    e.perSp.forEach(s=>{ if(s.ok){ calls+=s.calls; species++; } });
+    return {key:k, calls, species, mornings:e.days.size,
+            offSp:e.allSp.size-species, offCalls:e.allCalls-calls}; });
 }
 // A band scale draws every tick it is given, so thin them by hand rather than let 100
 // morning labels overprint into a grey smear.
@@ -1101,9 +1117,23 @@ function renderTrend(){
   if(!rows.length){ el.innerHTML='<p class="empty">Nothing on record yet.</p>'; if(hint) hint.textContent=""; return; }
   const total=rows.reduce((s,d)=>s+d[metric],0);
   const best=rows.reduce((a,b)=> b[metric]>a[metric]?b:a, rows[0]);
+  // What the floor is holding back, so a bar that drops as you raise the slider is legible.
+  // Species are sub-additive across periods, so that one is counted over the whole record
+  // rather than summed per bar.
+  let held;
+  if(metric==="calls"){
+    const n=rows.reduce((s,d)=>s+d.offCalls,0);
+    held = n ? `${n.toLocaleString()} detections below the floor, not counted` : "";
+  } else {
+    const all=new Set(), kept=new Set();
+    summary.forEach(r=>{ all.add(r.name); if(r.onset!=null) kept.add(r.name); });
+    const n=all.size-kept.size;
+    held = n ? `${n} species never cleared it` : "";
+  }
   if(hint) hint.innerHTML = `${rows.length} ${PERIOD_WORD[level]||level}${rows.length===1?"":"s"} on record` +
-    (metric==="calls" ? ` &middot; ${total.toLocaleString()} detections in all` : ``) +
-    ` &middot; busiest ${best.key} at ${best[metric].toLocaleString()}`;
+    (metric==="calls" ? ` &middot; ${total.toLocaleString()} detections counted` : ``) +
+    ` &middot; busiest ${best.key} at ${best[metric].toLocaleString()}` +
+    (held ? ` &middot; <span class="muted">${held}</span>` : ``);
   const names=rows.map(d=>d.key);
   el.append(Plot.plot({ width:W(el), height:ratioH(el,.30,190,300),
     marginLeft:ML(el,false), marginRight:16, marginBottom:rows.length>10?54:34, style:plotStyle(),
@@ -1119,7 +1149,9 @@ function renderTrend(){
       Plot.ruleY([0], {stroke:css("--line")}),
       Plot.tip(rows, Plot.pointerX({x:"key", y:metric, title:d=>
         `${d.key}\n${d.calls.toLocaleString()} detections · ${d.species} species\n`+
-        `${d.mornings} morning${d.mornings===1?"":"s"}`+(d.key===cur?"\n(in scope)":"\nclick to scope here")}))
+        `${d.mornings} morning${d.mornings===1?"":"s"}`+
+        (d.offSp ? `\n${d.offSp} species below the floor (${d.offCalls.toLocaleString()} detections) not counted` : ``)+
+        (d.key===cur?"\n(in scope)":"\nclick to scope here")}))
     ]}));
   wirePeriodClicks(el, names);
 }

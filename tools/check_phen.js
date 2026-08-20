@@ -93,5 +93,45 @@ for (const page of pages) {
   if (missW.length) console.log(`      browser-only rows: ${missW.slice(0, 3).join(", ")}`);
   examples.forEach(e => console.log("      " + e));
   if (total) failures++;
+
+  // --- the Overview bar must equal the chapter beneath it -------------------------------
+  // Two charts computing "how many species, how many calls" from the same data by different
+  // routes. The Overview once summed detections straight off `summary`, which the floor does
+  // not touch, so it reported 71 species while the chapter below drew 42 -- and no amount of
+  // looking at either chart alone would show it. The page's lead text now promises they
+  // agree, so check the promise.
+  const trend = new Function("meta", "day_keys", "summary", "aggSel", "periods",
+    extract(src, "periodsFor") + "\n" + extract(src, "trendRows") +
+    "\nperiods = periodsFor(aggSel.value);\nreturn {rows: trendRows(), periods};");
+  let mism = 0, checked = 0, moved = false;
+  const yearly = f => trend(meta, DATA.day_keys, summaryAt(f), { value: "year" }, []).rows[0];
+  const lo = yearly(1), hi = yearly(20);
+  moved = lo && hi && (lo.species !== hi.species || lo.calls !== hi.calls);
+  for (const f of [1, 2, 3, 5, 8, 12, 20]) {
+    const summary = summaryAt(f);
+    for (const level of ["day", "week", "month", "year"]) {
+      const { rows, periods } = trend(meta, DATA.day_keys, summary, { value: level }, []);
+      for (const key of periods) {
+        const days = new Set(meta.days.filter(d => DATA.day_keys[d][level] === key));
+        const g = {};
+        summary.forEach(r => { if (days.has(r.date)) (g[r.name] || (g[r.name] = [])).push(r); });
+        let sp = 0, calls = 0;
+        for (const name of Object.keys(g)) {           // renderPeriod's default admission test
+          const rs = g[name], n = rs.reduce((s, r) => s + r.n, 0);
+          if (n > 0 && rs.some(r => r.onset != null)) { sp++; calls += n; }
+        }
+        const bar = rows.find(r => r.key === key);
+        checked++;
+        if (!bar || bar.species !== sp || bar.calls !== calls) {
+          if (mism++ === 0) console.log(`     FAIL floor=${f} ${level} ${key}: bar ` +
+            `${bar ? bar.species + "sp/" + bar.calls : "missing"} vs chapter ${sp}sp/${calls}`);
+        }
+      }
+    }
+  }
+  if (!moved) { console.log(`     FAIL the trend does not respond to the detection floor`); failures++; }
+  if (mism) { console.log(`     FAIL ${mism} of ${checked} Overview/chapter combinations disagree`); failures++; }
+  else if (moved) console.log(`     ok   Overview matches the chapter across ${checked} floor x grain x period ` +
+    `combinations, and follows the floor (${lo.species} species at 1 -> ${hi.species} at 20)`);
 }
 process.exit(failures ? 1 : 0);

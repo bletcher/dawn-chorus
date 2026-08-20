@@ -62,6 +62,20 @@ def test_browser_phenology_matches_python(page):
     assert "every field matches" in r.stdout, r.stdout
 
 
+def test_overview_follows_the_floor_and_matches_the_chapter(page):
+    """Two charts, one question, different routes -- so they can drift apart silently.
+
+    The Overview once summed detections straight off the summary, which the detection floor
+    does not touch (it only nulls onset), so it reported every species on record while the
+    chapter directly beneath it drew the far smaller set that cleared the floor. Neither
+    chart looks wrong on its own; only the comparison shows it.
+    """
+    r = _run(page)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "follows the floor" in r.stdout, r.stdout
+    assert "disagree" not in r.stdout, r.stdout
+
+
 def test_payload_carries_the_raw_times(page):
     """Without `phen` the floor silently reverts to whatever the build used."""
     import re
