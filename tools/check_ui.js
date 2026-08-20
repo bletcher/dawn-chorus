@@ -88,10 +88,16 @@ function ladder(src) {
       "the score is the hero, above the scope bar"],
     [(src.match(/id="chart-hero"/g) || []).length === 1 && !src.includes('data-card="timeline"'),
       "and it exists exactly once — moved, not copied"],
-    [/data-mode="picture"/.test(src) && /data-mode="precision"/.test(src),
-      "the hero offers Picture and Precision"],
+    [/data-mode="picture"/.test(src) && /data-mode="detail"/.test(src),
+      "the hero offers Picture and Detail"],
     [/HERO_MODE==="picture"/.test(src),
       "Picture drops the occupancy ramp rather than drawing a second chart"],
+    // Five bordered pills competed with the title for actions nobody performs while reading.
+    [(src.match(/class="linkbtn" id="/g) || []).length === 2 && !/id="addBtn"/.test(src)
+      && !/id="theme"/.test(src),
+      "the masthead is two quiet links; Add data and Theme folded into the dialogs"],
+    [/name="theme" value="system"/.test(src) && /function applyTheme/.test(src),
+      "theme is a three-state setting, including match-the-system"],
     [rungs.every(r => scopes.includes(r)), "every rung has a scope sentence element"],
     [cards.length === 8, `eight cards plus the hero (got ${cards.length})`],
     [/data-card="season"/.test(seasonBody),

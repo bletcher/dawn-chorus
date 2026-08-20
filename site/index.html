@@ -46,6 +46,15 @@
   h1{font-size:34px; line-height:1.05; margin:0 0 4px; letter-spacing:-.01em; text-wrap:balance;}
   .sub{color:var(--muted); font-size:13.5px}
   .tag{color:var(--dawn); font-weight:600}
+  /* Five bordered pills competed with the title and with each other for a set of actions
+     nobody performs while reading. Two quiet links now: documentation in one dialog,
+     preferences in the other. Theme moved inside Settings, where a preference belongs, and
+     gained a "match the system" state it never had as a toggle. */
+  .linkbtn{font:inherit; font-size:13px; background:none; border:0; padding:2px 0; cursor:pointer;
+    color:var(--muted); border-bottom:1px solid transparent}
+  .linkbtn:hover{color:var(--ink); border-bottom-color:var(--accent)}
+  .linkbtn:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
+  .hbtns{gap:16px}
   button.theme{background:var(--surface); color:var(--ink2); border:1px solid var(--line);
     border-radius:8px; padding:7px 11px; font-size:13px; cursor:pointer; white-space:nowrap}
   button.theme:hover{border-color:var(--accent); color:var(--ink)}
@@ -361,10 +370,8 @@
       <div class="sub" id="subline"></div>
     </div>
     <div class="hbtns">
-      <button class="theme" id="addBtn" aria-haspopup="dialog">＋ Add data</button>
-      <button class="theme" id="setBtn" aria-haspopup="dialog">⚙ Settings</button>
-      <button class="theme" id="guideBtn" aria-haspopup="dialog">Guide</button>
-      <button class="theme" id="theme" aria-label="Toggle light or dark theme">◐ Theme</button>
+      <button class="linkbtn" id="guideBtn" aria-haspopup="dialog">Guide</button>
+      <button class="linkbtn" id="setBtn" aria-haspopup="dialog">Settings</button>
     </div>
   </header>
 
@@ -375,7 +382,7 @@
               aria-label="How to read this" title="How to read this">i</button>
       <span class="metseg" id="heroMode" role="group" aria-label="Detail">
         <button type="button" data-mode="picture" aria-pressed="true">Picture</button>
-        <button type="button" data-mode="precision" aria-pressed="false">Precision</button>
+        <button type="button" data-mode="detail" aria-pressed="false">Detail</button>
       </span>
     </div>
     <p class="chfind heroline" id="find-morning"></p>
@@ -613,6 +620,15 @@
     </div>
 
     <div class="setrow">
+      <b>Theme</b>
+      <label><input type="radio" name="theme" value="system" checked>
+        <span>Match the system
+          <small>Follows your operating system's light or dark setting, and changes with it.</small></span></label>
+      <label><input type="radio" name="theme" value="light"><span>Light</span></label>
+      <label><input type="radio" name="theme" value="dark"><span>Dark</span></label>
+    </div>
+
+    <div class="setrow">
       <b>Cards</b>
       <label><input type="checkbox" id="autoCollapse" checked>
         <span>Collapse thin charts automatically
@@ -690,13 +706,8 @@
     <p>New mornings, or a whole new site? Use the <span class="tag">＋ Add data</span> button in the
       header — it walks through the short local step. Recordings stay on your machine; only the
       detection times are published.</p>
-  </div>
-</div>
 
-<div class="modal" id="addModal" hidden>
-  <div class="dialog" role="dialog" aria-modal="true" aria-label="Add data">
-    <button class="close" id="addClose" aria-label="Close">&times;</button>
-    <h2 class="display">Add data</h2>
+    <h2 class="display" style="margin-top:26px">Adding data</h2>
     <p>This site is <b>static</b> &mdash; the charts are precomputed files, so there is no upload in
       the browser. You add data on the machine that holds the recordings; they never leave it, and
       only detection times are published.</p>
@@ -729,6 +740,7 @@
       details are in the project README.</p>
   </div>
 </div>
+
 
 <script>
 window.__bootFetch = async function(boot){
@@ -1561,7 +1573,7 @@ function updateScopeLabel(S){
 // Persisted per browser. Kept in one object so adding an option later is a one-line change
 // here plus a control in the Settings dialog, rather than another ad-hoc global.
 const SET_KEY="dc.settings";
-const SETTINGS=Object.assign({xmode:"dawn", autoCollapse:true},
+const SETTINGS=Object.assign({xmode:"dawn", autoCollapse:true, theme:"system"},
   (()=>{ try{ return JSON.parse(localStorage.getItem(SET_KEY)||"{}"); }catch(e){ return {}; } })());
 function saveSettings(){ try{ localStorage.setItem(SET_KEY, JSON.stringify(SETTINGS)); }catch(e){} }
 
@@ -1711,7 +1723,7 @@ function periodNote(all, sparse, rows, S){
    Picture is what a visitor can read without being taught anything -- names, bars, a dawn
    line; Precision adds the statistics the bars are actually made of. Promoted here from the
    middle of the page, and MOVED rather than copied, so there is still exactly one of it. */
-let HERO_MODE = localStorage.getItem("dc_hero_mode")==="precision" ? "precision" : "picture";
+let HERO_MODE = localStorage.getItem("dc_hero_mode")==="detail" ? "detail" : "picture";
 function renderTimeline(S){
   const el=document.getElementById("chart-hero"); el.innerHTML="";
   const g=aggBySpecies(S);
@@ -2323,6 +2335,8 @@ function applySettings(){
       const l=r.closest("label"); if(l) l.title="Needs civil-dawn times — regenerate this page to enable clock time";
     }
   });
+  document.querySelectorAll('input[name="theme"]').forEach(r=> r.checked = r.value===SETTINGS.theme);
+  applyTheme();
   const ac=document.getElementById("autoCollapse"); if(ac) ac.checked = !!SETTINGS.autoCollapse;
   const md=document.getElementById("minDet"), mo=document.getElementById("minDetOut");
   if(md){ md.value=String(MIN_DET); md.disabled=!PHEN;
@@ -2433,8 +2447,16 @@ document.getElementById("nextDet").onclick = ()=>{ if(cur && cur.list && cur.pos
     lc.oninput=()=>{ LABEL_MIN=parseFloat(lc.value); lo.value=LABEL_MIN.toFixed(2);
       localStorage.setItem("dc_label_min", lc.value); renderClip(); }; }
 })();
-document.getElementById("theme").onclick = ()=>{ const curTheme=root.getAttribute("data-theme") ||
-    (matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"); root.setAttribute("data-theme", curTheme==="dark"?"light":"dark"); renderAll(); };
+// Three states, not a blind toggle: "system" is the default and the only one that keeps
+// following the OS, so it has to be expressible rather than something you fall out of.
+function applyTheme(){
+  if(SETTINGS.theme==="light" || SETTINGS.theme==="dark") root.setAttribute("data-theme", SETTINGS.theme);
+  else root.removeAttribute("data-theme");
+}
+document.querySelectorAll('input[name="theme"]').forEach(r=> r.addEventListener("change", ()=>{
+  if(!r.checked) return;
+  SETTINGS.theme=r.value; saveSettings(); applyTheme(); renderAll();
+}));
 (function(){
   function wire(modalId, btnId){ const m=document.getElementById(modalId); if(!m) return null;
     const b=document.getElementById(btnId); if(b) b.onclick=()=>{ m.hidden=false; };
@@ -2474,7 +2496,7 @@ renderSubline(); renderFoot(); buildChips(); syncTrendMetric(); syncHeroMode(); 
       const hb = document.querySelector(".hbtns"); if(!hb) return;
       const a = document.createElement("a");
       a.href = "/"; a.title = "Run models, rebuild, publish";
-      a.innerHTML = '<button class="theme">⚙ Control panel</button>';
+      a.innerHTML = '<button class="linkbtn">Control panel</button>';
       hb.appendChild(a);
     })
     .catch(()=>{});          // served by serve.py or opened as a file: no panel, no link
