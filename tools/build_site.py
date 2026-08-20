@@ -556,6 +556,22 @@ TEMPLATE = r"""<!doctype html>
   .crumb button[aria-current="true"]{color:var(--ink); font-weight:600}
   .crumb button:disabled{color:var(--muted); cursor:default; opacity:.6}
   .crumb .sep{color:var(--line)}
+  /* ── Context strip ────────────────────────────────────────────────────────────────
+     Every morning on record, always on screen, never scoped and never aggregated -- a
+     context view that changed with the selection would not be context. Hand-rolled SVG
+     rather than a Plot call: it redraws on every render, and the brush that replaces the
+     period slider needs pixel-exact hit testing on these same bars. */
+  .striprow{align-items:stretch}
+  .strip{flex:1; min-width:200px; height:46px; position:relative; cursor:pointer;
+    border:1px solid var(--line); border-radius:8px; background:var(--surface); padding:3px 4px}
+  .strip svg{display:block; width:100%; height:100%; overflow:visible}
+  .strip .bar{transition:opacity .12s ease}
+  @media (prefers-reduced-motion:reduce){ .strip .bar{transition:none} }
+  .strip:hover .bar:not(.in){opacity:.62}
+  .strip .sel{fill:var(--accent); opacity:.10}
+  .strip .selline{stroke:var(--accent); stroke-width:1.5; opacity:.55}
+  .strip:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  @media (max-width:720px){ .striprow .metseg{order:3} .strip{min-width:140px} }
   section.card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px 18px 8px; margin-bottom:20px; box-shadow:var(--shadow)}
   .card h2{font-size:19px; margin:0 0 3px; letter-spacing:-.01em}
   .card .lead{color:var(--ink2); font-size:13.5px; margin:0 0 14px; max-width:64ch}
@@ -670,6 +686,15 @@ TEMPLATE = r"""<!doctype html>
       <span class="eyebrow">You&nbsp;are&nbsp;here</span>
       <nav class="crumb" id="crumb" aria-label="Where you are"></nav>
     </div>
+    <div class="scoperow striprow">
+      <span class="eyebrow">Record</span>
+      <div class="strip" id="strip" role="group" aria-label="Every morning on record; click one to scope to it"></div>
+      <span class="metseg" id="stripMetric" role="group" aria-label="Metric">
+        <button type="button" data-metric="calls" aria-pressed="true">Calls</button>
+        <button type="button" data-metric="species" aria-pressed="false">Species</button>
+      </span>
+      <span class="scopehint" id="stripHint"></span>
+    </div>
     <div class="scoperow">
       <span class="eyebrow">Time&nbsp;scope</span>
       <label class="ctl">Aggregate
@@ -723,10 +748,6 @@ TEMPLATE = r"""<!doctype html>
           floor on one of that period's mornings, the same test the charts below use, so the highlighted
           bar always equals the chapter under it.</p>
         <div class="controls">
-          <span class="metseg" id="trendMetric" role="group" aria-label="Metric">
-            <button type="button" data-metric="calls" aria-pressed="true">Calls</button>
-            <button type="button" data-metric="species" aria-pressed="false">Species</button>
-          </span>
           <span class="mutedhint" id="trendHint"></span>
         </div>
         <div class="plot" id="chart-trend"></div>
@@ -1073,6 +1094,7 @@ let summary = summaryAt(MIN_DET);
 function setMinDet(v){
   MIN_DET=v; localStorage.setItem("dc_min_det", String(v));
   summary=summaryAt(v);
+  STRIP_ROWS=null;              // the strip counts species that clear the floor, so it moves too
 }
 
 // per (dayIdx|spIdx) -> dense bin-count array. The single building block for every chart.
@@ -1358,7 +1380,7 @@ function updateAudioCard(S){
     if(!one) gate.innerHTML = `Audio is per morning, so this rung needs the scope narrowed to one. `+
       `<button type="button" id="gotoMorning">Go to ${esc(S[S.length-1]||"the last morning")}</button>`;
     const b=document.getElementById("gotoMorning");
-    if(b) b.onclick=()=>{ narrowToMorning(S[S.length-1]); };
+    if(b) b.onclick=()=>{ narrowToMorning(S[S.length-1], true); };
   }
   const lead=document.getElementById("audioLead");
   if(lead && one) lead.innerHTML =
@@ -1366,15 +1388,18 @@ function updateAudioCard(S){
 }
 
 // Narrowing for the reader rather than telling them to go and do it: switch to Daily and
-// land on the morning they were already looking at.
-function narrowToMorning(day){
+// land on the morning they were already looking at. `goListen` only for the gate button --
+// clicking the strip should scope the page, not yank it down to the audio player.
+function narrowToMorning(day, goListen){
   if(!day) return;
   if(aggSel.value!=="day"){ aggSel.value="day"; periods=periodsFor("day");
     slider.min=0; slider.max=Math.max(0,periods.length-1); slider.disabled=periods.length<=1; }
   const i=periods.indexOf(day);
   if(i>=0) slider.value=String(i);
   renderAll(); syncSteppers();
-  const r=rungEl("morning"); if(r){ setRung("morning", false, true); r.scrollIntoView({behavior:"smooth", block:"start"}); }
+  if(!goListen) return;
+  const r=rungEl("morning");
+  if(r && !r.hidden){ setRung("morning", false, true); r.scrollIntoView({behavior:"smooth", block:"start"}); }
 }
 
 const median = a => { const s=a.filter(v=>v!=null).sort((x,y)=>x-y), n=s.length;
@@ -1417,8 +1442,12 @@ let TREND_METRIC = localStorage.getItem("dc_trend_metric") || "calls";
 // Overview reporting 71 species while the chapter below it drew 42. A species counts here
 // on the same test the rest of the page uses: it cleared the floor on at least one morning
 // in the period. What that excludes is reported rather than dropped, in `offSp`/`offCalls`.
-function trendRows(){
-  const level=aggSel.value, agg=new Map();
+// `level`/`keys` default to the scope control, which is how every existing caller uses it.
+// The context strip passes "day" explicitly: context must never lose resolution, so it
+// shows one bar per morning whatever the aggregation is set to.
+function trendRows(level, keys){
+  level = level || aggSel.value;
+  const agg=new Map();
   summary.forEach(r=>{ const dk=day_keys[r.date]; if(!dk) return;
     const k=dk[level]; let e=agg.get(k);
     if(!e) agg.set(k, e={perSp:new Map(), days:new Set(), allCalls:0, allSp:new Set()});
@@ -1427,7 +1456,7 @@ function trendRows(){
     s.calls+=r.n; if(r.onset!=null) s.ok=true; });
   // Emitted in `periods` order, not the map's: these bars ARE the slider's positions, and a
   // bar that maps to no period could not be clicked into scope.
-  return periods.map(k=>{ const e=agg.get(k);
+  return (keys || periods).map(k=>{ const e=agg.get(k);
     if(!e) return {key:k, calls:0, species:0, mornings:0, offSp:0, offCalls:0};
     let calls=0, species=0;
     e.perSp.forEach(s=>{ if(s.ok){ calls+=s.calls; species++; } });
@@ -1443,6 +1472,66 @@ function thinTicks(keys, max){
 }
 const shortKey = (k, level) =>
   level==="day" ? k.slice(5) : level==="month" ? k : level==="week" ? k.replace("-W","w") : k;
+
+/* ---- the context strip ------------------------------------------------------------
+   The record in miniature, pinned above everything. It is the same chart as Rung 1's
+   trend, at the finest grain, with the current selection lit -- so the scope stops being
+   a number in a dropdown and becomes a shape you can see the edges of.
+
+   Deliberately NOT aggregated by the scope control. Set the aggregation to Monthly and the
+   strip still draws 14 mornings; only the selection widens. Context that re-bucketed
+   itself whenever the selection changed would be showing you the selection twice and the
+   record never. */
+let STRIP_ROWS = null;                       // day-grain rows, rebuilt when the floor moves
+function stripRows(){ return STRIP_ROWS || (STRIP_ROWS = trendRows("day", meta.days)); }
+function renderStrip(S){
+  const host=document.getElementById("strip"); if(!host) return;
+  const rows=stripRows(), metric=TREND_METRIC, sel=new Set(S);
+  const W=Math.max(80, host.clientWidth-8), H=Math.max(20, host.clientHeight-6);
+  const n=rows.length || 1;
+  const max=Math.max(1, ...rows.map(d=>d[metric]));
+  const step=W/n, bw=Math.max(2, Math.min(step-2, step*0.78)), pad=(step-bw)/2;
+  const inIdx=rows.map((d,i)=> sel.has(d.key) ? i : -1).filter(i=>i>=0);
+  const lo=inIdx.length?inIdx[0]:-1, hi=inIdx.length?inIdx[inIdx.length-1]:-1;
+
+  // The selection drawn as one rectangle, not just tinted bars: a week is a RANGE, and a
+  // range is what the brush will be. This is that rectangle, one phase early.
+  const selRect = lo>=0
+    ? `<rect class="sel" x="${(lo*step).toFixed(1)}" y="0" width="${((hi-lo+1)*step).toFixed(1)}" height="${H}" rx="3"></rect>`
+      + `<line class="selline" x1="${(lo*step).toFixed(1)}" y1="0" x2="${(lo*step).toFixed(1)}" y2="${H}"></line>`
+      + `<line class="selline" x1="${((hi+1)*step).toFixed(1)}" y1="0" x2="${((hi+1)*step).toFixed(1)}" y2="${H}"></line>`
+    : "";
+  const accent=css("--accent"), dawn=css("--dawn");
+  const bars=rows.map((d,i)=>{
+    const v=d[metric], h=Math.max(v>0?1.5:0, (v/max)*(H-3));
+    const on=sel.has(d.key);
+    return `<rect class="bar${on?" in":""}" x="${(i*step+pad).toFixed(1)}" y="${(H-h).toFixed(1)}" `+
+      `width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="1" fill="${on?dawn:accent}" `+
+      `opacity="${on?1:.42}"><title>${esc(d.key)} — ${d.calls.toLocaleString()} detections, `+
+      `${d.species} species${on?" (in scope)":" · click to scope here"}</title></rect>`;
+  }).join("");
+  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${selRect}${bars}</svg>`;
+
+  // Orientation, not a headline. A total here would be day-grain and so would NOT match
+  // Rung 1's total at a coarser grain -- species are sub-additive across periods, because
+  // the floor is a per-morning test. Two totals on screen that disagree for a correct
+  // reason are still two totals that disagree, so the strip names the busiest morning and
+  // leaves the summing to the chart whose grain is stated.
+  const hint=document.getElementById("stripHint");
+  if(hint){ const best=rows.reduce((a,b)=> b[metric]>a[metric]?b:a, rows[0]||{key:"—"});
+    hint.textContent = `${rows.length} morning${rows.length===1?"":"s"} · busiest ${best.key} · click to scope`; }
+}
+// Clicking the strip scopes to that morning. The whole point of putting the record on
+// screen permanently is being able to see a spike and go straight to it.
+(()=>{ const host=document.getElementById("strip"); if(!host) return;
+  host.addEventListener("click", ev=>{
+    const rows=stripRows(); if(!rows.length) return;
+    const r=host.getBoundingClientRect();
+    const i=Math.max(0, Math.min(rows.length-1,
+      Math.floor((ev.clientX-r.left-4)/Math.max(1,(r.width-8))*rows.length)));
+    narrowToMorning(rows[i].key);
+  });
+})();
 
 function renderTrend(){
   const el=document.getElementById("chart-trend"); el.innerHTML="";
@@ -2171,15 +2260,18 @@ function renderFindings(S){
 // Calls vs species: two genuinely different questions. Calls is dominated by whichever
 // species happens to be repetitive that week; species counts every bird once, so a quiet
 // morning with a wide cast reads high on one and low on the other.
-(()=>{ const seg=document.getElementById("trendMetric"); if(!seg) return;
+// The metric now lives in the context band, because it governs the strip AND Rung 1's full
+// trend -- one piece of state, so one control, in the band where the other global lenses are.
+(()=>{ const seg=document.getElementById("stripMetric"); if(!seg) return;
   seg.addEventListener("click", e=>{
     const b=e.target.closest("button[data-metric]"); if(!b) return;
     TREND_METRIC=b.dataset.metric; localStorage.setItem("dc_trend_metric", TREND_METRIC);
-    syncTrendMetric(); renderTrend(); renderFindings(scopedDays());
+    const S=scopedDays();
+    syncTrendMetric(); renderStrip(S); renderTrend(); renderFindings(S);
   });
 })();
 function syncTrendMetric(){
-  document.querySelectorAll("#trendMetric button").forEach(b=>
+  document.querySelectorAll("#stripMetric button").forEach(b=>
     b.setAttribute("aria-pressed", String(b.dataset.metric===TREND_METRIC)));
 }
 
@@ -2189,7 +2281,7 @@ function renderAll(){ refreshColors(); const S=scopedDays(); updateScopeLabel(S)
   renderWeather(S,"t","chart-temp","temperature at dawn (°C)","temp");
   renderWeather(S,"r","chart-rain","rain over the window (mm)","rain");
   renderTable(S); updateAudioCard(S); renderFindings(S);
-  renderRungs(S); renderCrumb(S); syncBarHeight(); }
+  renderStrip(S); renderRungs(S); renderCrumb(S); syncBarHeight(); }
 
 // ---- card collapsing + settings ---------------------------------------------------------
 // Cards render into a hidden element as 0-wide, so anything opened has to be redrawn.

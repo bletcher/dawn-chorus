@@ -81,11 +81,70 @@ function ladder(src) {
   ];
 }
 
+// The context strip must show the RECORD, not the selection. If it re-bucketed itself with
+// the aggregation it would be showing the selection twice and the record never -- and the
+// brush that replaces the period slider needs these bars to be one morning each.
+function strip(src, DATA) {
+  if (!DATA || !DATA.phen) return [[true, "strip checks skipped (no payload)"]];
+  const meta = DATA.meta;
+  const pctx = { meta, GRID: meta.grid, NB: meta.grid.length, PHEN: DATA.phen,
+    PHSP: meta.phen_species, QO: meta.onset_quantile, BUILT_SUMMARY: DATA.summary, _sumCache: {} };
+  const summaryAt = new Function(...Object.keys(pctx),
+    grabFn(src, "quantileSorted") + "\n" + grabFn(src, "summaryAt") + "\nreturn summaryAt;")(...Object.values(pctx));
+
+  const draw = (level, S, metric, floor) => {
+    const host = { clientWidth: 600, clientHeight: 46, innerHTML: "" };
+    const hint = { textContent: "" };
+    const ctx = { meta, day_keys: DATA.day_keys, summary: summaryAt(floor),
+      aggSel: { value: level }, periods: [], TREND_METRIC: metric, STRIP_ROWS: null,
+      css: () => "#000", esc: s => String(s),
+      document: { getElementById: id => (id === "strip" ? host : id === "stripHint" ? hint : null) } };
+    const body = grabFn(src, "periodsFor") + "\n" + grabFn(src, "trendRows") + "\n" +
+      grabFn(src, "stripRows") + "\n" + grabFn(src, "renderStrip") +
+      `\nperiods = periodsFor(aggSel.value);\nrenderStrip(${JSON.stringify(S)});` +
+      `\nreturn {html: host.innerHTML, hint: hint.textContent};`;
+    return new Function(...Object.keys(ctx), "host", "hint", body)(...Object.values(ctx), host, hint);
+  };
+
+  const days = meta.days, out = [];
+  const counts = ["day", "week", "month", "year"].map(l =>
+    (draw(l, days, "calls", 5).html.match(/class="bar/g) || []).length);
+  out.push([counts.every(c => c === days.length),
+    `strip draws one bar per morning at every aggregation (got ${counts.join("/")}, expected ${days.length})`]);
+
+  const step = 592 / days.length;
+  const S = days.slice(Math.min(2, days.length - 1), Math.min(5, days.length));
+  const html = draw("day", S, "calls", 5).html;
+  const m = /<rect class="sel" x="([\d.]+)" y="0" width="([\d.]+)"/.exec(html);
+  const i0 = days.indexOf(S[0]);
+  out.push([!!m && Math.abs(+m[1] - i0 * step) < 1 && Math.abs(+m[2] - S.length * step) < 1,
+    "the selection rectangle spans exactly the scoped mornings"]);
+  out.push([(html.match(/class="bar in"/g) || []).length === S.length,
+    "exactly the scoped mornings are lit"]);
+
+  const geo = f => (draw("day", days, "species", f).html.match(/height="([\d.]+)"/g) || []).join(",");
+  out.push([geo(1) !== geo(20), "the strip follows the detection floor"]);
+
+  // A total here would be day-grain and would not match Rung 1's at a coarser grain.
+  const hint = draw("day", [days[0]], "calls", 5).hint;
+  out.push([!/\d{3,}/.test(hint.replace(/\d{4}-\d{2}-\d{2}/g, "")),
+    "the strip's hint carries no grain-dependent total"]);
+  return out;
+}
+
+const argv = process.argv.slice(2);
+const pi = argv.indexOf("--payload");
+const external = pi >= 0 ? argv[pi + 1] : null;
+const pages = pi >= 0 ? argv.filter((a, i) => i !== pi && i !== pi + 1) : argv;
+
 let failures = 0;
-for (const page of process.argv.slice(2)) {
+for (const page of pages) {
   const src = fs.readFileSync(page, "utf8");
+  const m = src.match(/<script type="application\/json" id="data">([\s\S]*?)<\/script>/);
+  let DATA = null;
+  try { DATA = JSON.parse(external ? fs.readFileSync(external, "utf8") : m[1]); } catch (e) {}
   console.log(page);
-  for (const [ok, what] of [...ladder(src), ...audioStates(src)]) {
+  for (const [ok, what] of [...ladder(src), ...audioStates(src), ...strip(src, DATA)]) {
     console.log(`  ${ok ? "ok  " : "FAIL"} ${what}`);
     if (!ok) failures++;
   }
